@@ -4,7 +4,7 @@
  */
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 'firebase/auth';
 import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -63,10 +63,32 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 // Global sign in helper
 export const login = async () => {
   try {
+    // Detect mobile
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+      await signInWithRedirect(auth, googleProvider);
+      return null; // Redirect will happen, component will re-mount
+    }
+
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Login failed", error);
+    
+    if (error.code === 'auth/popup-blocked' || error.code === 'auth/cancelled-popup-request') {
+      try {
+        console.log("Popup blocked or multiple requests, trying redirect...");
+        await signInWithRedirect(auth, googleProvider);
+      } catch (redirectError) {
+        console.error("Redirect login failed", redirectError);
+        alert("O login falhou. Por favor, certifique-se de que popups estão permitidos ou tente novamente.");
+      }
+    } else if (error.code === 'auth/popup-closed-by-user') {
+      // User closed the popup
+    } else {
+      alert("Erro ao entrar com Google: " + error.message);
+    }
     return null;
   }
 };
