@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, User, CreditCard, Search, Calendar as CalendarIcon, IdCard, CheckCircle2, XCircle, ChevronRight, Bell, Receipt, Edit3, Users, MessageCircle, FileSpreadsheet, FileText } from 'lucide-react';
+import { Plus, Trash2, User, CreditCard, Search, Calendar as CalendarIcon, IdCard, CheckCircle2, XCircle, ChevronRight, Bell, Receipt, Edit3, Users, FileSpreadsheet, FileText, Phone } from 'lucide-react';
 import { Participant, Installment, Dependent } from '../types';
 import { cn, formatDate, formatCurrency } from '../lib/utils';
+import { MEMBERS_LIST } from '../data/members';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, updateDoc, writeBatch, where, getDocs } from 'firebase/firestore';
@@ -738,13 +739,23 @@ const Participantes: React.FC = () => {
                   required
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
+                  list="members-list"
                   className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-100 font-medium"
                 />
+                <datalist id="members-list">
+                  {MEMBERS_LIST
+                    .filter(name => !allParticipants.some(p => p.name.toLowerCase() === name.toLowerCase() && p.id !== editingId))
+                    .sort()
+                    .map(name => (
+                      <option key={name} value={name} />
+                    ))
+                  }
+                </datalist>
               </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                  <MessageCircle size={12} /> WhatsApp/Telefone
+                  <Phone size={12} className="text-emerald-500" /> WhatsApp/Telefone
                 </label>
                 <input 
                   type="text" 
@@ -795,7 +806,7 @@ const Participantes: React.FC = () => {
                       formData.transport === 'Carro' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200"
                     )}
                   >
-                    Vou de Carro
+                    Carro
                   </button>
                   <button
                     type="button"
@@ -805,7 +816,7 @@ const Participantes: React.FC = () => {
                       formData.transport === 'Ônibus' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200"
                     )}
                   >
-                    Vou de Ônibus
+                    Ônibus
                   </button>
                 </div>
               </div>
@@ -1037,7 +1048,7 @@ const Participantes: React.FC = () => {
                             className="flex items-center justify-center text-green-500 hover:text-green-400 transition-colors bg-green-500/10 p-1 rounded border border-green-500/20"
                             title="Contato WhatsApp"
                           >
-                            <MessageCircle size={12} />
+                            <Phone size={12} className="text-emerald-500" />
                           </a>
                           <div className="flex items-center bg-slate-800/50 rounded p-0.5 gap-1 border border-slate-700/50">
                             <button
@@ -1161,7 +1172,7 @@ const Participantes: React.FC = () => {
                               className="text-green-500 bg-green-500/10 p-2 rounded-lg border border-green-500/20 flex items-center justify-center hover:bg-green-500/20 transition-all"
                               title="Mensagem WhatsApp"
                             >
-                              <MessageCircle size={14} />
+                              <Phone size={14} className="text-emerald-500" />
                             </a>
                           )}
                           <button
