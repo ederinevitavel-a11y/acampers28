@@ -22,7 +22,7 @@ const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }) => {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-50 md:top-0 md:bottom-auto md:border-b md:border-t-0 shadow-[0_-8px_20px_rgba(0,0,0,0.6)] md:shadow-md">
+    <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-50 md:top-[72px] md:bottom-auto md:border-b md:border-t-0 shadow-[0_-8px_20px_rgba(0,0,0,0.6)] md:shadow-md">
       <div className="max-w-7xl mx-auto overflow-x-auto no-scrollbar scroll-smooth">
         <div className="flex justify-start sm:justify-center items-center h-[72px] md:h-16 px-2">
           {tabs.map((tab) => {
