@@ -1,0 +1,188 @@
+{
+  "entities": {
+    "SaborCentralEntry": {
+      "title": "Sabor Central Entry",
+      "description": "Registers post-service cantina sales",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "item": { "type": "string" },
+        "quantitySold": { "type": "number" },
+        "unitCost": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "totalRevenue": { "type": "number" },
+        "profit": { "type": "number" },
+        "isPaid": { "type": "boolean" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["date", "item", "quantitySold", "unitCost", "totalRevenue"]
+    },
+    "BrasaGracaEntry": {
+      "title": "Brasa & Graça Entry",
+      "description": "Registers monthly BBQ and salad sales",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "item": { "type": "string" },
+        "quantitySold": { "type": "number" },
+        "unitCost": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "totalRevenue": { "type": "number" },
+        "profit": { "type": "number" },
+        "isPaid": { "type": "boolean" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["date", "item", "quantitySold", "totalCost", "totalRevenue"]
+    },
+    "BrilhoCelesteWash": {
+      "title": "Brilho Celeste Wash",
+      "description": "Car wash scheduling and booking",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "timeSlot": { "type": "string" },
+        "clientName": { "type": "string" },
+        "packageName": { "type": "string", "enum": ["1 Lavagem", "2 Lavagens", "4 Lavagens"] },
+        "packagePrice": { "type": "number" },
+        "isPaid": { "type": "boolean" },
+        "clientId": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["date", "timeSlot", "clientName", "packageName", "packagePrice", "isPaid"]
+    },
+    "BrilhoCelesteClient": {
+      "title": "Brilho Celeste Client",
+      "description": "Prepaid car wash client database",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "carInfo": { "type": "string" },
+        "packageName": { "type": "string", "enum": ["1 Lavagem", "2 Lavagens", "4 Lavagens"] },
+        "totalWashesBought": { "type": "number" },
+        "washesRemaining": { "type": "number" },
+        "packagePrice": { "type": "number" },
+        "isPaid": { "type": "boolean" },
+        "paymentDate": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["name", "packageName", "totalWashesBought", "washesRemaining", "packagePrice", "isPaid", "timestamp"]
+    },
+    "BrilhoCelesteExpense": {
+      "title": "Brilho Celeste Expense",
+      "description": "Expenses associated with Brilho Celeste events",
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["description", "amount", "date", "timestamp"]
+    },
+    "ConectaCentralEvent": {
+      "title": "Conecta Central Event",
+      "description": "Big bimestrial events",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "totalRevenue": { "type": "number" },
+        "totalExpense": { "type": "number" },
+        "profit": { "type": "number" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["date", "name", "totalRevenue", "totalExpense"]
+    },
+    "RecebaSuabencaoRaffle": {
+      "title": "Receba sua Benção Raffle",
+      "description": "Low-cost Sunday raffles",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "prize": { "type": "string" },
+        "participantsCount": { "type": "number" },
+        "winnerName": { "type": "string" },
+        "ticketPrice": { "type": "number" },
+        "totalRevenue": { "type": "number" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["date", "prize", "participantsCount", "winnerName"]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "Camp participants registration",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "rg": { "type": "string" },
+        "phone": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "ageAtCamp": { "type": "number" },
+        "paymentType": { "type": "string", "enum": ["Inteira", "Meia", "Isento"] },
+        "transport": { "type": "string", "enum": ["Carro", "Ônibus"] },
+        "installments": { "type": "number" },
+        "dueDay": { "type": "number" },
+        "observation": { "type": "string" },
+        "isPaid": { "type": "boolean" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["name", "rg", "birthDate", "ageAtCamp", "paymentType", "transport"]
+    },
+    "Installment": {
+      "title": "Installment",
+      "description": "Installment for participant payment",
+      "type": "object",
+      "properties": {
+        "participantId": { "type": "string" },
+        "participantName": { "type": "string" },
+        "amount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "month": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "isPaid": { "type": "boolean" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["participantId", "participantName", "amount", "paidAmount", "month", "dueDate", "isPaid", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/sabor_central": {
+      "schema": "SaborCentralEntry",
+      "description": "Sunday cantina sales records"
+    },
+    "/brasa_graca": {
+      "schema": "BrasaGracaEntry",
+      "description": "Monthly BBQ sales records"
+    },
+    "/brilho_celeste": {
+      "schema": "BrilhoCelesteWash",
+      "description": "Car wash scheduling and payments"
+    },
+    "/brilho_celeste_clients": {
+      "schema": "BrilhoCelesteClient",
+      "description": "Car wash prepaid clients"
+    },
+    "/brilho_celeste_expenses": {
+      "schema": "BrilhoCelesteExpense",
+      "description": "Car wash expenses records"
+    },
+    "/conecta_central": {
+      "schema": "ConectaCentralEvent",
+      "description": "Bimestrial events records"
+    },
+    "/receba_bencao": {
+      "schema": "RecebaSuabencaoRaffle",
+      "description": "Sunday raffle records"
+    },
+    "/participants": {
+      "schema": "Participant",
+      "description": "Camp participants list"
+    },
+    "/installments": {
+      "schema": "Installment",
+      "description": "Participant payment installments"
+    }
+  }
+}

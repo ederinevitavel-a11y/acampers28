@@ -1,0 +1,196 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Reusable helpers
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { 
+      return isSignedIn() && (
+        request.auth.token.email_verified == true && (
+          request.auth.token.email == 'ederlcs@hotmail.com' ||
+          request.auth.token.email == 'elaine.rsn@hotmail.com' ||
+          request.auth.token.email == 'rafa-cnunes@hotmail.com'
+        )
+      ); 
+    }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // Validation for Sabor Central
+    function isValidSaborEntry(data) {
+      return data.keys().hasAll(['date', 'item', 'quantitySold', 'unitCost', 'totalCost', 'totalRevenue', 'profit', 'isPaid', 'timestamp'])
+        && data.keys().size() <= 10
+        && data.date is string && data.date.size() == 10
+        && data.item is string && data.item.size() <= 100
+        && data.quantitySold is number
+        && data.unitCost is number
+        && data.totalCost is number
+        && data.totalRevenue is number
+        && data.profit is number
+        && data.isPaid is bool
+        && data.timestamp is number;
+    }
+
+    // Validation for Brasa & Graça Entry
+    function isValidBrasaEntry(data) {
+      return data.keys().hasAll(['date', 'item', 'quantitySold', 'totalCost', 'totalRevenue', 'profit', 'timestamp'])
+        && data.keys().size() <= 10
+        && data.date is string && data.date.size() == 10
+        && data.item is string && data.item.size() <= 100
+        && data.quantitySold is number
+        && data.totalCost is number
+        && data.totalRevenue is number
+        && data.profit is number
+        && data.timestamp is number;
+    }
+
+    // Validation for Brilho Celeste Wash
+    function isValidWash(data) {
+      return data.keys().hasAll(['date', 'timeSlot', 'clientName', 'packageName', 'packagePrice', 'isPaid', 'timestamp'])
+        && data.keys().size() <= 9
+        && data.date is string && data.date.size() == 10
+        && data.timeSlot is string && data.timeSlot.size() <= 10
+        && data.clientName is string && data.clientName.size() <= 100
+        && data.packageName is string && data.packageName.size() <= 50
+        && data.packagePrice is number
+        && data.isPaid is bool
+        && data.timestamp is number;
+    }
+
+    // Validation for Brilho Celeste Client
+    function isValidClient(data) {
+      return data.keys().hasAll(['name', 'packageName', 'totalWashesBought', 'washesRemaining', 'packagePrice', 'isPaid', 'timestamp'])
+        && data.keys().size() <= 12
+        && data.name is string && data.name.size() <= 100
+        && data.packageName is string && data.packageName.size() <= 50
+        && data.totalWashesBought is number
+        && data.washesRemaining is number
+        && data.packagePrice is number
+        && data.isPaid is bool
+        && data.timestamp is number;
+    }
+
+    // Validation for Brilho Celeste Expense
+    function isValidCelesteExpense(data) {
+      return data.keys().hasAll(['description', 'amount', 'date', 'timestamp'])
+        && data.keys().size() <= 5
+        && data.description is string && data.description.size() <= 100
+        && data.amount is number
+        && data.date is string && data.date.size() == 10
+        && data.timestamp is number;
+    }
+
+    // Validation for Conecta Central
+    function isValidConecta(data) {
+      return data.keys().hasAll(['date', 'name', 'totalRevenue', 'totalExpense', 'profit', 'timestamp'])
+        && data.keys().size() <= 8
+        && data.date is string && data.date.size() == 10
+        && data.name is string && data.name.size() <= 100
+        && data.totalRevenue is number
+        && data.totalExpense is number
+        && data.profit is number
+        && data.timestamp is number;
+    }
+
+    // Validation for Receba sua Benção Raffle
+    function isValidReceba(data) {
+      return data.keys().hasAll(['date', 'prize', 'participantsCount', 'winnerName', 'ticketPrice', 'totalRevenue', 'timestamp'])
+        && data.keys().size() <= 9
+        && data.date is string && data.date.size() == 10
+        && data.prize is string && data.prize.size() <= 100
+        && data.participantsCount is number
+        && data.winnerName is string
+        && data.ticketPrice is number
+        && data.totalRevenue is number
+        && data.timestamp is number;
+    }
+
+    // Validation for Participant
+    function isValidParticipant(data) {
+      return data.keys().hasAll(['name', 'rg', 'birthDate', 'ageAtCamp', 'paymentType', 'transport', 'timestamp'])
+        && data.keys().size() <= 20
+        && data.name is string && data.name.size() <= 200
+        && data.rg is string && data.rg.size() <= 100
+        && data.birthDate is string
+        && data.ageAtCamp is number
+        && data.paymentType is string
+        && data.transport is string
+        && data.timestamp is number;
+    }
+
+    // Validation for Installment
+    function isValidInstallment(data) {
+      return data.keys().hasAll(['participantId', 'participantName', 'amount', 'paidAmount', 'month', 'dueDate', 'isPaid', 'timestamp'])
+        && data.keys().size() <= 15
+        && data.participantId is string && data.participantId.size() <= 128
+        && data.participantName is string && data.participantName.size() <= 200
+        && data.amount is number
+        && data.paidAmount is number
+        && data.month is string
+        && data.dueDate is string
+        && data.isPaid is bool
+        && data.timestamp is number;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /sabor_central/{entryId} {
+      allow list: if isVerified();
+      allow get: if isVerified() && isValidId(entryId);
+      allow create, update: if isVerified() && isValidId(entryId) && isValidSaborEntry(incoming());
+      allow delete: if isVerified() && isValidId(entryId);
+    }
+
+    match /brasa_graca/{entryId} {
+      allow list: if isVerified();
+      allow get: if isVerified() && isValidId(entryId);
+      allow create, update: if isVerified() && isValidId(entryId) && isValidBrasaEntry(incoming());
+      allow delete: if isVerified() && isValidId(entryId);
+    }
+
+    match /brilho_celeste/{washId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(washId);
+      allow create, update: if isVerified() && isValidId(washId) && isValidWash(incoming());
+    }
+
+    match /brilho_celeste_clients/{clientId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(clientId);
+      allow create, update: if isVerified() && isValidId(clientId) && isValidClient(incoming());
+    }
+
+    match /brilho_celeste_expenses/{expenseId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(expenseId);
+      allow create, update: if isVerified() && isValidId(expenseId) && isValidCelesteExpense(incoming());
+    }
+
+    match /conecta_central/{eventId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(eventId);
+      allow create, update: if isVerified() && isValidId(eventId) && isValidConecta(incoming());
+    }
+
+    match /receba_bencao/{raffleId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(raffleId);
+      allow create, update: if isVerified() && isValidId(raffleId) && isValidReceba(incoming());
+    }
+
+    match /participants/{participantId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(participantId);
+      allow create, update: if isVerified() && isValidParticipant(incoming());
+    }
+
+    match /installments/{installmentId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(installmentId);
+      allow create, update: if isVerified() && isValidInstallment(incoming());
+    }
+  }
+}

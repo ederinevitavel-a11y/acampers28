@@ -1,0 +1,8 @@
+{
+  "name": "Acampa Central 2028",
+  "description": "Aplicativo de controle para organização e arrecadação de valores para o acampamento Acampa Central 2028.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
