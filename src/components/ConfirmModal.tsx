@@ -40,17 +40,17 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
             exit={{ opacity: 0, scale: 0.95 }}
             className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl"
           >
-            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2 mb-4">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
               <AlertCircle size={18} className="text-red-500" /> {title}
             </h3>
-            <p className="text-sm text-slate-400 font-medium mb-6">
+            <p className="text-sm text-slate-200 font-bold mb-6">
               {message}
             </p>
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onCancel(); }}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-300 hover:bg-slate-800 transition-all"
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition-all"
               >
                 {cancelText}
               </button>

@@ -8,11 +8,11 @@
 
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-200 antialiased selection:bg-blue-900 selection:text-blue-100;
+    @apply bg-black text-slate-100 antialiased selection:bg-blue-800 selection:text-white;
   }
   
   h1, h2, h3, h4 {
-    @apply font-display text-slate-100;
+    @apply font-display text-white;
   }
 }
 

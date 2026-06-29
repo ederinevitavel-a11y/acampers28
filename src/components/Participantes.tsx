@@ -1,7 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, User, CreditCard, Search, Calendar as CalendarIcon, IdCard, CheckCircle2, XCircle, ChevronRight, Bell, Receipt, Edit3, Users, FileSpreadsheet, FileText, Phone } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Plus, Trash2, User, CreditCard, Search, 
+  Calendar as CalendarIcon, IdCard, CheckCircle2, 
+  XCircle, ChevronRight, Bell, Receipt, 
+  Edit3, Users, FileSpreadsheet, FileText, FileSignature, FileStack,
+  Phone, AlertCircle, Info, Filter,
+  ArrowUpRight, Download, MoreHorizontal,
+  Target, Rocket, Car
+} from 'lucide-react';
 import { Participant, Installment, Dependent } from '../types';
-import { cn, formatDate, formatCurrency } from '../lib/utils';
+import { cn, formatDate, formatCurrency, maskPhone, maskRG } from '../lib/utils';
 import { MEMBERS_LIST } from '../data/members';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
@@ -12,18 +20,65 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const CAMP_DATE = new Date('2028-01-01'); // Fix to beginning of 2028
+const CAMP_DATE = new Date('2028-01-29T00:00:00'); // Novo Acampa 28 date
+
+const getMaxInstallments = () => {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth() + 1; // 1-12
+  
+  // Deadline: Dec 2027
+  const targetYear = 2027;
+  const targetMonth = 12;
+  
+  // Total months available from NEXT month
+  const totalMonths = ((targetYear - currentYear) * 12) + (targetMonth - currentMonth);
+  return Math.max(1, totalMonths);
+};
 
 const Participantes: React.FC = () => {
-  const { participants: allParticipants, installments: allInstallments, loading } = useConsolidatedData();
+  const { participants: allParticipants, installments: allInstallments, loading, error } = useConsolidatedData();
   const [installmentsMap, setInstallmentsMap] = useState<Record<string, Installment[]>>({});
   const [showForm, setShowForm] = useState(false);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [logoBase64, setLogoBase64] = useState<string | null>(null);
+  const [logoBgColor, setLogoBgColor] = useState<[number, number, number]>([15, 23, 42]);
+
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        setLogoBase64(canvas.toDataURL('image/jpeg'));
+        
+        try {
+          const pixel = ctx.getImageData(5, 5, 1, 1).data;
+          setLogoBgColor([pixel[0], pixel[1], pixel[2]]);
+        } catch (e) {
+          console.warn("Could not extract background color from logo", e);
+        }
+      }
+    };
+    img.src = 'https://i.imgur.com/yqEPRBk.jpeg';
+  }, []);
   const [paymentModal, setPaymentModal] = useState<{isOpen: boolean, participantId: string, inst: Installment | null, amount: string, error?: string}>({isOpen: false, participantId: '', inst: null, amount: ''});
   const [obsModal, setObsModal] = useState<{isOpen: boolean, instId: string, text: string}>({isOpen: false, instId: '', text: ''});
   const [deleteParticipantModal, setDeleteParticipantModal] = useState<{id: string, name: string} | null>(null);
   const [deleteDependentModal, setDeleteDependentModal] = useState<{id: string, name: string} | null>(null);
+  const [confirmStatusModal, setConfirmStatusModal] = useState<{
+    participantId: string,
+    installmentId: string,
+    currentPaid: boolean,
+    amount: number,
+    month: string,
+    participantName: string
+  } | null>(null);
   
   // Update local installments map when global data changes or for detail view
   useEffect(() => {
@@ -39,27 +94,13 @@ const Participantes: React.FC = () => {
     phone: '',
     birthDate: '',
     transport: 'Carro' as 'Carro' | 'Ônibus',
-    installments: 1,
+    installments: getMaxInstallments(),
     dueDay: 10,
     observation: '',
     isPaid: false,
     dependents: [] as Dependent[]
   });
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  const getMaxInstallments = () => {
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth() + 1; // 1-12
-    
-    // Deadline: Dec 2027
-    const targetYear = 2027;
-    const targetMonth = 12;
-    
-    // Total months available from NEXT month
-    const totalMonths = ((targetYear - currentYear) * 12) + (targetMonth - currentMonth);
-    return Math.max(1, totalMonths);
-  };
 
   const getParticipantOverdue = (participantId: string) => {
     const today = new Date();
@@ -114,9 +155,9 @@ const Participantes: React.FC = () => {
   const getPaymentValue = (type: 'Inteira' | 'Meia' | 'Isento', transport: 'Carro' | 'Ônibus') => {
     if (type === 'Isento') return 0;
     if (transport === 'Ônibus') {
-      return type === 'Inteira' ? 864 : 432;
+      return type === 'Inteira' ? 792 : 396;
     } else {
-      return type === 'Inteira' ? 720 : 360;
+      return type === 'Inteira' ? 648 : 324;
     }
   };
 
@@ -375,38 +416,44 @@ const Participantes: React.FC = () => {
 
   const generatePDFReceipt = (p: Participant, installments: Installment[]) => {
     const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     const paidInstallments = installments.filter(i => i.isPaid);
     const totalPaid = paidInstallments.reduce((acc, i) => acc + (i.paidAmount || 0), 0);
     const userEmail = auth.currentUser?.email || 'N/A';
     
     // Header
     doc.setFillColor(79, 70, 229); // Indigo 600
-    doc.rect(0, 0, 210, 40, 'F');
+    doc.rect(0, 0, 210, 45, 'F');
+    
+    if (logoBase64) {
+      doc.addImage(logoBase64, 'JPEG', 14, 5, 35, 35);
+    }
     
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
     doc.setFont('helvetica', 'bold');
-    doc.text('ACAMPA 2028', 105, 20, { align: 'center' });
+    doc.text('ACAMPA 2028', 115, 20, { align: 'center' });
     doc.setFontSize(14);
-    doc.text('COMPROVANTE DE PAGAMENTO', 105, 32, { align: 'center' });
+    doc.text('COMPROVANTE DE PAGAMENTO', 115, 32, { align: 'center' });
     
     // Participant Info
-    doc.setTextColor(50, 50, 50);
+    doc.setTextColor(30, 41, 59);
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text('Dados do Acamper:', 14, 55);
+    doc.text('Dados do Acamper:', 14, 65);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Nome: ${p.name}`, 14, 62);
-    doc.text(`RG: ${p.rg || 'Não informado'}`, 14, 69);
-    doc.text(`Telefone: ${p.phone || 'Não informado'}`, 14, 76);
+    doc.text(`Nome: ${p.name}`, 14, 72);
+    doc.text(`RG: ${p.rg || 'Não informado'}`, 14, 79);
+    doc.text(`Telefone: ${p.phone || 'Não informado'}`, 14, 86);
     
     // Summary
     doc.setFont('helvetica', 'bold');
-    doc.text('Resumo Financeiro:', 14, 90);
+    doc.text('Resumo Financeiro:', 14, 100);
     doc.setFont('helvetica', 'normal');
     
     autoTable(doc, {
-      startY: 95,
+      startY: 105,
       head: [['Descrição', 'Valor']],
       body: [
         ['Valor Total', formatCurrency(p.totalValue || 0)],
@@ -421,6 +468,7 @@ const Participantes: React.FC = () => {
     // History
     if (paidInstallments.length > 0) {
       doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
       doc.text('Histórico de Pagamentos:', 14, (doc as any).lastAutoTable.finalY + 15);
       
       autoTable(doc, {
@@ -432,7 +480,7 @@ const Participantes: React.FC = () => {
           formatCurrency(i.paidAmount || 0),
           'PAGO'
         ]),
-        theme: 'grid',
+        theme: 'striped',
         headStyles: { fillColor: [16, 185, 129] }, // Emerald 500
         margin: { left: 14, right: 14 }
       });
@@ -442,7 +490,7 @@ const Participantes: React.FC = () => {
     }
     
     // Footer
-    const finalY = (doc as any).lastAutoTable.finalY + 30;
+    const finalY = pageHeight - 20;
     doc.setFontSize(10);
     doc.setTextColor(150, 150, 150);
     doc.setFont('helvetica', 'normal');
@@ -450,6 +498,111 @@ const Participantes: React.FC = () => {
     doc.text(`Data de emissão: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, 14, finalY + 6);
     
     doc.save(`Recibo_${p.name.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
+  };
+
+  const generatePaymentBooklet = (p: Participant, installments: Installment[]) => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    // Filter only unpaid installments and sort by date
+    const openInstallments = installments.filter(i => !i.isPaid);
+    
+    if (openInstallments.length === 0) return;
+
+    const sortedInstallments = [...openInstallments].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    
+    // Original total count for correct labeling (e.g. 3/10)
+    const totalInstallmentsCount = installments.length;
+    
+    let currentY = 10;
+    const stubHeight = 65; // Height for each stub
+    const padding = 10;
+
+    sortedInstallments.forEach((inst) => {
+      // Find original index for display purposes (1-indexed)
+      const originalIndex = installments.findIndex(i => i.id === inst.id) + 1;
+
+      // Check if we need a new page
+      if (currentY + stubHeight > pageHeight - 10) {
+        doc.addPage();
+        currentY = 10;
+      }
+
+      // Draw Stub Box
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.1);
+      doc.rect(padding, currentY, pageWidth - (padding * 2), stubHeight);
+      
+      // Dashed line for cutting
+      (doc as any).setLineDash([2, 2], 0);
+      doc.line(0, currentY + stubHeight + 2, pageWidth, currentY + stubHeight + 2);
+      (doc as any).setLineDash([], 0);
+
+      if (logoBase64) {
+        doc.addImage(logoBase64, 'JPEG', padding + 10, currentY + 5, 18, 18);
+      }
+
+      // Title & Installment Info
+      doc.setTextColor(30, 41, 59);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('ACAMPA CENTRAL 2028 - CARNÊ', padding + 30, currentY + 12);
+      
+      doc.setFontSize(11);
+      doc.setTextColor(37, 99, 235);
+      doc.text(`Parcela ${originalIndex}/${totalInstallmentsCount}`, pageWidth - padding - 10, currentY + 10, { align: 'right' });
+
+      // Participant Details
+      doc.setTextColor(71, 85, 105);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text('ACAMPER:', padding + 10, currentY + 28);
+      doc.setTextColor(15, 23, 42);
+      doc.setFont('helvetica', 'bold');
+      doc.text(p.name.toUpperCase(), padding + 10, currentY + 33);
+
+      // Financial Details
+      doc.setTextColor(71, 85, 105);
+      doc.setFont('helvetica', 'normal');
+      doc.text('VENCIMENTO:', padding + 10, currentY + 43);
+      doc.text('VALOR DA PARCELA:', padding + 60, currentY + 43);
+      
+      doc.setTextColor(15, 23, 42);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text(formatDate(inst.dueDate), padding + 10, currentY + 48);
+      doc.text(formatCurrency((p.totalValue || 0) / (p.installments || 1)), padding + 60, currentY + 48);
+
+      // PIX Info
+      doc.setFillColor(241, 245, 249);
+      doc.rect(padding + 120, currentY + 15, 65, 30, 'F');
+      doc.setTextColor(71, 85, 105);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.text('PAGAMENTO VIA PIX:', padding + 125, currentY + 22);
+      doc.setTextColor(37, 99, 235);
+      doc.setFontSize(8);
+      doc.text('acampacentral@hotmail.com', padding + 125, currentY + 27);
+      doc.setTextColor(148, 163, 184);
+      doc.setFontSize(6);
+      doc.text('Igreja Batista Central - Itaim Pta', padding + 125, currentY + 32);
+
+      // Footer of Stub
+      doc.setDrawColor(226, 232, 240);
+      doc.line(padding + 10, currentY + 54, pageWidth - padding - 10, currentY + 54);
+      
+      doc.setTextColor(148, 163, 184);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'italic');
+      doc.text('Este documento é um controle de pagamento. Mantenha seus comprovantes originais.', padding + 10, currentY + 59);
+      
+      doc.text('Autenticação Mecânica / Assinatura do Responsável', pageWidth - padding - 10, currentY + 59, { align: 'right' });
+
+      currentY += stubHeight + 8;
+    });
+
+    doc.save(`Carne_Acampa_${p.name.replace(/\s+/g, '_')}.pdf`);
   };
 
   const handleEditParticipant = (p: Participant) => {
@@ -553,12 +706,17 @@ const Participantes: React.FC = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
     const title = "Lista Completa de Acampers 2028";
     
-    doc.setFontSize(18);
-    doc.text(title, 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, 14, 22);
+    if (logoBase64) {
+      doc.addImage(logoBase64, 'JPEG', 14, 5, 25, 25);
+    }
 
-    const tableData = [];
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(18);
+    doc.text(title, 42, 15);
+    doc.setFontSize(10);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, 42, 22);
+
+    const tableData: any[][] = [];
     allParticipants.forEach(p => {
       const status = (!p.totalValue || p.totalValue === 0) ? 'Isento' : p.isPaid ? 'Liquidado' : getParticipantOverdue(p.id) ? 'Em Atraso' : 'Em Dia';
       
@@ -592,7 +750,7 @@ const Participantes: React.FC = () => {
     autoTable(doc, {
       head: [['Tipo', 'Nome', 'RG', 'Nascimento', 'Idade', 'Categoria', 'Transporte', 'Status']],
       body: tableData,
-      startY: 30,
+      startY: 35,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [79, 70, 229] }, // Indigo 600
     });
@@ -600,716 +758,808 @@ const Participantes: React.FC = () => {
     doc.save(`Lista_Acampers_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.pdf`);
   };
 
-  const totalPeople = allParticipants.length + allParticipants.reduce((acc, p) => acc + (p.dependents?.length || 0), 0);
-  const totalInteira = allParticipants.reduce((acc, p) => acc + (p.paymentType === 'Inteira' ? 1 : 0) + (p.dependents?.filter(d => d.paymentType === 'Inteira').length || 0), 0);
-  const totalMeia = allParticipants.reduce((acc, p) => acc + (p.paymentType === 'Meia' ? 1 : 0) + (p.dependents?.filter(d => d.paymentType === 'Meia').length || 0), 0);
-  const totalIsentos = allParticipants.reduce((acc, p) => acc + (p.paymentType === 'Isento' ? 1 : 0) + (p.dependents?.filter(d => d.paymentType === 'Isento').length || 0), 0);
+  const handlePrintContract = () => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    
+    if (logoBase64) {
+      doc.addImage(logoBase64, 'JPEG', 14, 5, 25, 25);
+    }
+
+    // Header
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 41, 59);
+    doc.text("CONTRATO DE CONDIÇÕES GERAIS – ACAMPA CENTRAL 2028", pageWidth / 2, 20, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
+    const headerInfo = [
+      "Organização: Igreja Batista Central – Itaim Paulista",
+      "Evento: Acampa Central 2028",
+      "Datas: 29 e 30 de janeiro de 2028",
+      "Saída: 28 de janeiro de 2028, às 19h, da Igreja Batista Central – Itaim Paulista"
+    ];
+    headerInfo.forEach((text, i) => doc.text(text, 20, 35 + (i * 7)));
+
+    // Cláusulas
+    let y = 70;
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(15, 23, 42);
+    doc.text("Cláusulas", 20, y);
+    y += 10;
+
+    const clauses = [
+      { t: "1. Adesão e Concordância", c: "A inscrição no Acampa Central 2028 implica plena concordância com todas as condições estabelecidas neste contrato. O(a) participante declara estar ciente e de acordo com as regras aqui descritas." },
+      { t: "2. Pagamento e Cancelamento", c: "- O valor da inscrição será informado no momento da inscrição e deverá ser pago em dia até a data limite acordada entre o(a) participante e a organização.\n- Devido a compromissos assumidos com o estabelecimento, em caso de desistência não haverá devolução de valores pagos, independentemente do motivo.\n- A inscrição é pessoal e intransferível.\n- Em caso específico de mudança ou substituição do(a) acampante, é obrigação do responsável comunicar previamente a organização do Acampa Central 2028." },
+      { t: "3. Regras de Conduta Cristã", c: "O(a) participante compromete-se a:\n- Respeitar os princípios cristãos de convivência, amor ao próximo e respeito mútuo.\n- Participar das atividades espirituais e recreativas com espírito de cooperação.\n- Abster-se de portar bebidas alcoólicas, cigarros ou qualquer substância ilícita.\n- Manter comportamento condizente com os valores da fé cristã, respeitando o próximo em amor." },
+      { t: "4. Responsabilidade da Organização", c: "- A organização não se responsabiliza por objetos pessoais perdidos ou danificados.\n- Em caso de comportamento inadequado ou contrário às regras, o(a) participante poderá ser desligado do acampamento sem direito a reembolso." },
+      { t: "5. Responsabilidade dos Pais ou Responsáveis Legais", c: "- Os pais ou responsáveis legais são integralmente responsáveis pelos menores de idade inscritos no Acampa Central 2028.\n- É dever dos responsáveis garantir que os menores cumpram todas as regras estabelecidas neste contrato.\n- Qualquer ocorrência envolvendo menores será tratada diretamente com os pais ou responsáveis legais." },
+      { t: "6. Segurança e Saúde", c: "- O(a) participante deve informar previamente qualquer condição médica relevante.\n- É obrigatório seguir as orientações da equipe responsável quanto à segurança e uso das instalações." },
+      { t: "7. Autorização de Imagem", c: "O(a) participante autoriza o uso de sua imagem em fotos e vídeos para fins de divulgação institucional da Igreja Batista Central, sem ônus para a organização." },
+      { t: "8. Disposições Finais", c: "Este contrato entra em vigor na data da inscrição e é regido pelas leis brasileiras.\nCasos omissos serão resolvidos pela liderança da Igreja Batista Central.\nA inscrição significa concordância integral com todas as cláusulas aqui descritas." }
+    ];
+
+    clauses.forEach(clause => {
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      if (y > 270) { doc.addPage(); y = 20; }
+      doc.text(clause.t, 20, y);
+      y += 6;
+      
+      doc.setFont("helvetica", "normal");
+      const lines = doc.splitTextToSize(clause.c, pageWidth - 40);
+      lines.forEach(line => {
+        if (y > 280) { doc.addPage(); y = 20; }
+        doc.text(line, 20, y);
+        y += 5;
+      });
+      y += 5;
+    });
+
+    doc.save(`Contrato_Geral_Acampa_2028.pdf`);
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex items-center justify-center min-h-screen bg-black">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-black p-4 text-center">
+        <div className="w-16 h-16 bg-red-950 text-red-400 rounded-full flex items-center justify-center mb-6">
+          <AlertCircle size={32} />
+        </div>
+        <h2 className="text-xl font-bold text-white mb-2">Erro de Conexão</h2>
+        <p className="text-slate-400 max-w-md mb-6">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-xl transition-colors"
+        >
+          Tentar Novamente
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 pb-28 md:pt-20 px-3 sm:px-4">
-      <header className="py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-100 flex items-center gap-2">
-            <Users className="text-indigo-400" size={24} />
-            Acampers
-          </h1>
-          <p className="text-xs sm:text-slate-400 font-medium text-slate-500">Cadastro do Acampa 2028</p>
+    <div className="space-y-6 sm:space-y-8 pb-32 max-w-7xl mx-auto px-4 sm:px-6">
+      {/* Intelligence Header */}
+      <header className="py-4 sm:py-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-6">
+        <div className="w-full">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-900/20 shrink-0">
+              <Users className="text-white" size={24} />
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tighter uppercase">Acampers</h1>
+          </div>
+          <p className="text-[10px] sm:text-sm font-bold text-slate-400 ml-1 uppercase tracking-widest">Base de Dados</p>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <div className="flex items-center gap-2 flex-1 sm:flex-none">
+        
+        <div className="flex items-center gap-2 sm:gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-2xl border border-slate-800 backdrop-blur-md flex-1 sm:flex-none justify-center">
             <button 
               onClick={handleExportExcel}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 p-2.5 rounded-xl border border-emerald-500/20 active:scale-95 transition-all"
+              className="p-2.5 sm:p-3 text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition-all"
               title="Exportar Excel"
             >
               <FileSpreadsheet size={18} />
-              <span className="text-[10px] font-bold uppercase sm:hidden">Excel</span>
             </button>
             <button 
               onClick={handleExportPDF}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-600/20 text-red-400 hover:bg-red-600/30 p-2.5 rounded-xl border border-red-500/20 active:scale-95 transition-all"
+              className="p-2.5 sm:p-3 text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all"
               title="Exportar PDF"
             >
               <FileText size={18} />
-              <span className="text-[10px] font-bold uppercase sm:hidden">PDF</span>
+            </button>
+            <button 
+              onClick={handlePrintContract}
+              className="p-2.5 sm:p-3 text-blue-400 hover:bg-blue-500/10 rounded-xl transition-all"
+              title="Contrato de Condições"
+            >
+              <FileSignature size={18} />
             </button>
           </div>
-          <button 
-            onClick={() => {
-              setEditingId(null);
-              setFormData({ name: '', rg: '', phone: '', birthDate: '', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
-              setShowForm(true);
-            }}
-            className="bg-indigo-600 text-white p-3 rounded-xl sm:rounded-full shadow-lg shadow-indigo-900/30 active:scale-95 transition-all flex items-center gap-2"
-          >
-            <Plus size={20} />
-            <span className="text-[10px] font-bold uppercase sm:hidden">Novo</span>
-          </button>
         </div>
       </header>
 
-      {/* Search Bar */}
-      <div className="relative group">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
-        <input 
-          type="text" 
-          placeholder="Buscar acamper..."
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-          className="w-full p-3.5 pl-10 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-inner outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-medium text-slate-100 placeholder:text-slate-600"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-1">
-        <div className="bg-slate-900/40 p-2.5 rounded-2xl border border-slate-800/80 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-indigo-400 font-black uppercase mb-0.5 flex items-center justify-center gap-1 tracking-wider"><Users size={10} /> Pessoas</p>
-          <p className="text-lg sm:text-xl font-black text-slate-100">{totalPeople}</p>
-        </div>
-        <div className="bg-slate-900/40 p-2.5 rounded-2xl border border-slate-800/80 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-fuchsia-400 font-black uppercase mb-0.5 flex items-center justify-center gap-1 tracking-wider">Inteiras</p>
-          <p className="text-lg font-black text-fuchsia-100">{totalInteira}</p>
-        </div>
-        <div className="bg-slate-900/40 p-2.5 rounded-2xl border border-slate-800/80 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-sky-400 font-black uppercase mb-0.5 flex items-center justify-center gap-1 tracking-wider">Meias</p>
-          <p className="text-lg font-black text-sky-100">{totalMeia}</p>
-        </div>
-        <div className="bg-slate-900/40 p-2.5 rounded-2xl border border-slate-800/80 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-emerald-400 font-black uppercase mb-0.5 flex items-center justify-center gap-1 tracking-wider">Isentos</p>
-          <p className="text-lg font-black text-emerald-100">{totalIsentos}</p>
+      {/* Intelligence Search & Filters */}
+      <div className="sticky top-[72px] md:top-0 z-30 py-3 bg-black md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0">
+        <div className="relative group w-full lg:max-w-2xl">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <Search className="text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
+          </div>
+          <input 
+            type="text" 
+            placeholder="Pesquisar..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-800 text-white pl-11 pr-4 py-3.5 sm:py-4 rounded-2xl md:rounded-[24px] focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-600 font-bold text-sm sm:text-base"
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
-        <div className="bg-slate-900/50 p-2.5 rounded-2xl border border-slate-800/50 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-slate-500 font-black uppercase mb-0.5 tracking-widest">Titulares</p>
-          <p className="text-base sm:text-lg font-black text-slate-100">{allParticipants.length}</p>
-        </div>
-        <div className="bg-green-500/5 p-2.5 rounded-2xl border border-green-500/10 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-green-500 font-black uppercase mb-0.5 tracking-widest">Liquidados</p>
-          <p className="text-base sm:text-lg font-black text-green-400">{allParticipants.filter(p => p.isPaid || p.totalValue === 0).length}</p>
-        </div>
-        <div className="bg-blue-500/5 p-2.5 rounded-2xl border border-blue-500/10 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-blue-400 font-black uppercase mb-0.5 tracking-widest">Em Dia</p>
-          <p className="text-base sm:text-lg font-black text-blue-400">{allParticipants.filter(p => !p.isPaid && p.totalValue > 0 && !getParticipantOverdue(p.id)).length}</p>
-        </div>
-        <div className="bg-red-500/5 p-2.5 rounded-2xl border border-red-500/10 shadow-sm text-center">
-          <p className="text-[8px] sm:text-[9px] text-red-500 font-black uppercase mb-0.5 tracking-widest">Atrasados</p>
-          <p className="text-base sm:text-lg font-black text-red-500">{allParticipants.filter(p => !p.isPaid && p.totalValue > 0 && getParticipantOverdue(p.id)).length}</p>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-2">
+          <h2 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2">
+            <Info size={18} className="text-indigo-400" />
+            Lista de Titulares
+          </h2>
         </div>
       </div>
 
       <AnimatePresence>
         {showForm && (
+          <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center p-0 md:p-6 bg-black/80 backdrop-blur-md">
             <motion.div 
-              initial={{ opacity: 0, y: "100%" }}
+              initial={{ opacity: 0, y: 100 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="bg-slate-900 p-6 rounded-t-3xl shadow-2xl border-t border-slate-800 fixed inset-x-0 bottom-0 top-10 z-[60] md:relative md:top-0 md:rounded-3xl md:border md:inset-x-0 md:bottom-auto overflow-y-auto no-scrollbar pb-24 md:pb-6"
+              exit={{ opacity: 0, y: 100 }}
+              className="w-full max-w-4xl bg-slate-900 md:rounded-[40px] rounded-t-[40px] border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             >
-              <div className="w-12 h-1 bg-slate-800 rounded-full mx-auto mb-6 md:hidden" />
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-black text-slate-100 flex items-center gap-2">
-                  <User className="text-indigo-500" />
-                  {editingId ? 'Editar Acamper' : 'Novo Acamper'}
-                </h2>
+              {/* Form Header */}
+              <div className="p-4 sm:p-8 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-900/20">
+                    {editingId ? <Edit3 className="text-white" size={20} /> : <Plus className="text-white" size={20} />}
+                  </div>
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tighter">
+                      {editingId ? 'Editar' : 'Novo Acamper'}
+                    </h2>
+                    <p className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none mt-0.5">Preencha os dados com atenção</p>
+                  </div>
+                </div>
                 <button 
-                  onClick={() => { setShowForm(false); setEditingId(null); }} 
-                  className="bg-slate-800 text-slate-400 p-2 rounded-full hover:text-slate-200 transition-colors"
+                  onClick={() => { setShowForm(false); setEditingId(null); }}
+                  className="p-2 sm:p-3 bg-slate-800 hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 rounded-xl sm:rounded-2xl transition-all"
                 >
                   <XCircle size={20} />
                 </button>
               </div>
-            <form onSubmit={handleAddParticipant} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                  <User size={12} /> Nome Completo
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="Nome do participante"
-                  required
-                  value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
-                  list="members-list"
-                  className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-100 font-medium"
-                />
-                <datalist id="members-list">
-                  {MEMBERS_LIST
-                    .filter(name => !allParticipants.some(p => p.name.toLowerCase() === name.toLowerCase() && p.id !== editingId))
-                    .sort()
-                    .map(name => (
-                      <option key={name} value={name} />
-                    ))
-                  }
-                </datalist>
-              </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                  <Phone size={12} className="text-emerald-500" /> WhatsApp/Telefone
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="(00) 00000-0000"
-                  value={formData.phone}
-                  onChange={e => setFormData({...formData, phone: e.target.value})}
-                  className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-100 font-medium"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                    <IdCard size={12} /> RG
-                  </label>
-                  <input 
-                    type="text" 
-                    placeholder="00.000.000-0"
-                    value={formData.rg}
-                    onChange={e => setFormData({...formData, rg: e.target.value})}
-                    className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none text-slate-100 font-medium"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                    <CalendarIcon size={12} /> Nascimento
-                  </label>
-                  <input 
-                    type="date" 
-                    required
-                    value={formData.birthDate}
-                    onChange={e => setFormData({...formData, birthDate: e.target.value})}
-                    className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none text-slate-100 font-medium"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                  Meio de Transporte
-                </label>
-                <div className="flex gap-4 p-1 bg-slate-800 rounded-xl border border-slate-700">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({...formData, transport: 'Carro'})}
-                    className={cn(
-                      "flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all",
-                      formData.transport === 'Carro' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200"
-                    )}
-                  >
-                    Carro
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({...formData, transport: 'Ônibus'})}
-                    className={cn(
-                      "flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all",
-                      formData.transport === 'Ônibus' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200"
-                    )}
-                  >
-                    Ônibus
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                  Observação
-                </label>
-                <textarea 
-                  placeholder="Restrições alimentares, problemas de saúde, etc..."
-                  value={formData.observation}
-                  onChange={e => setFormData({...formData, observation: e.target.value})}
-                  className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-100 font-medium text-sm resize-none"
-                  rows={2}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                    <CreditCard size={12} /> Qtd Parcelas
-                  </label>
-                    <select 
-                      value={formData.installments}
-                      onChange={e => setFormData({...formData, installments: Number(e.target.value)})}
-                      className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none text-slate-100 font-medium"
-                    >
-                      {[...Array(getMaxInstallments())].map((_, i) => (
-                        <option key={i + 1} value={i + 1}>{i + 1}x</option>
-                      ))}
-                    </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase ml-1 flex items-center gap-1">
-                    <CalendarIcon size={12} /> Dia Vencimento
-                  </label>
-                  <select 
-                    value={formData.dueDay}
-                    onChange={e => setFormData({...formData, dueDay: Number(e.target.value)})}
-                    className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl outline-none text-slate-100 font-medium"
-                  >
-                    {[5, 10, 15, 20, 25].map(day => (
-                      <option key={day} value={day}>Dia {day}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <p className="text-[10px] text-slate-500 italic ml-1">* Parcelamento entre 07/2026 e 12/2027</p>
-
-              {formData.birthDate && (
-                <div className="p-3 bg-indigo-950/40 rounded-xl border border-indigo-900/50 animate-in fade-in slide-in-from-top-2">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-[10px] text-indigo-400 font-bold uppercase">Idade em Base a 01/2028</p>
-                      <p className="text-lg font-bold text-indigo-300">{calculateAgeAtCamp(formData.birthDate)} anos</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-indigo-400 font-bold uppercase">Categoria</p>
-                      <p className="text-lg font-bold text-indigo-300">{getPaymentType(calculateAgeAtCamp(formData.birthDate))}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Dependents Section */}
-              <div className="pt-2 border-t border-slate-700/50 mt-4 mb-2">
-                <div className="flex justify-between items-center mb-3">
-                  <label className="text-sm font-bold text-slate-300 flex items-center gap-2">
-                    <Users size={16} className="text-indigo-400" /> Dependentes Familiares
-                  </label>
-                  <button 
-                    type="button" 
-                    onClick={handleAddDependent}
-                    className="flex items-center gap-1 text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded-full transition-all"
-                  >
-                    <Plus size={14} /> Adicionar
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {formData.dependents.map((dep, index) => (
-                    <div key={dep.id} className="bg-slate-800/50 border border-slate-700 p-3 rounded-xl relative group">
-                      <button 
-                        type="button" 
-                        onClick={(e) => { e.stopPropagation(); setDeleteDependentModal({id: dep.id, name: dep.name}); }}
-                        className="absolute -top-2 -right-2 bg-red-500/10 text-red-400 hover:text-red-300 hover:bg-red-500/20 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all border border-red-500/20"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                      
-                      <div className="grid grid-cols-2 gap-3 mb-3">
-                        <div className="col-span-2 space-y-1">
+              <div className="flex-1 overflow-y-auto p-5 sm:p-8 custom-scrollbar space-y-8 sm:space-y-10">
+                <form onSubmit={handleAddParticipant} id="participant-form">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-10">
+                    {/* Primary Info */}
+                    <div className="space-y-6 sm:space-y-8">
+                      <div className="space-y-5 sm:space-y-6">
+                        <div className="flex items-center gap-2 mb-2 sm:mb-4">
+                          <User size={14} className="text-indigo-400" />
+                          <h3 className="text-[10px] sm:text-xs font-black text-white uppercase tracking-widest">Informações do Titular</h3>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nome Completo</label>
                           <input 
                             type="text" 
-                            placeholder="Nome do dependente"
                             required
-                            value={dep.name}
-                            onChange={e => updateDependent(dep.id, 'name', e.target.value)}
-                            className="w-full px-3 py-2 text-sm bg-slate-900 border border-slate-700 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500 text-slate-100"
+                            value={formData.name}
+                            onChange={e => setFormData({...formData, name: e.target.value})}
+                            list="members-list"
+                            className="w-full bg-slate-800 border border-slate-700 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all font-bold placeholder:text-slate-600 text-sm"
+                            placeholder="Nome Completo"
                           />
+                          <datalist id="members-list">
+                            {MEMBERS_LIST
+                              .filter(name => !allParticipants.some(p => p.name.toLowerCase() === name.toLowerCase() && p.id !== editingId))
+                              .sort()
+                              .map(name => (
+                                <option key={name} value={name} />
+                              ))
+                            }
+                          </datalist>
                         </div>
-                        <div className="col-span-2 space-y-1">
-                          <input 
-                            type="text" 
-                            placeholder="RG (Opcional)"
-                            value={dep.rg || ''}
-                            onChange={e => updateDependent(dep.id, 'rg', e.target.value)}
-                            className="w-full px-3 py-2 text-sm bg-slate-900 border border-slate-700 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500 text-slate-100"
-                          />
+
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">RG</label>
+                            <input 
+                              type="text" 
+                              value={formData.rg}
+                              onChange={e => setFormData({...formData, rg: maskRG(e.target.value)})}
+                              className="w-full bg-slate-800 border border-slate-700 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl outline-none font-bold placeholder:text-slate-600 text-sm"
+                              placeholder="00.000.000-0"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">WhatsApp</label>
+                            <input 
+                              type="text" 
+                              value={formData.phone}
+                              onChange={e => setFormData({...formData, phone: maskPhone(e.target.value)})}
+                              className="w-full bg-slate-800 border border-slate-700 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl outline-none font-bold placeholder:text-slate-600 text-sm"
+                              placeholder="(00) 00000-0000"
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] text-slate-500 font-bold uppercase ml-1">Parentesco</label>
-                          <select 
-                            value={dep.relationship}
-                            onChange={e => updateDependent(dep.id, 'relationship', e.target.value)}
-                            className="w-full px-3 py-2 text-sm bg-slate-900 border border-slate-700 rounded-lg outline-none text-slate-100"
-                          >
-                            <option value="Cônjuge">Cônjuge</option>
-                            <option value="Filho(a)">Filho(a)</option>
-                            <option value="Outro">Outro</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] text-slate-500 font-bold uppercase ml-1">Nascimento</label>
-                          <input 
-                            type="date" 
-                            value={dep.birthDate}
-                            onChange={e => updateDependent(dep.id, 'birthDate', e.target.value)}
-                            className="w-full px-3 py-2 text-sm bg-slate-900 border border-slate-700 rounded-lg outline-none text-slate-100"
-                          />
+
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nascimento</label>
+                            <input 
+                              type="date" 
+                              required
+                              value={formData.birthDate}
+                              onChange={e => setFormData({...formData, birthDate: e.target.value})}
+                              className="w-full bg-slate-800 border border-slate-700 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl outline-none font-bold appearance-none text-sm"
+                            />
+                            {formData.birthDate && (
+                              <div className="flex items-center gap-1.5 mt-1 ml-1">
+                                <div className={cn(
+                                  "w-1.5 h-1.5 rounded-full",
+                                  getPaymentType(calculateAgeAtCamp(formData.birthDate)) === 'Inteira' ? "bg-indigo-400" : "bg-emerald-400"
+                                )} />
+                                <span className={cn(
+                                  "text-[8px] font-black uppercase tracking-wider",
+                                  getPaymentType(calculateAgeAtCamp(formData.birthDate)) === 'Inteira' ? "text-indigo-400" : "text-emerald-400"
+                                )}>
+                                  Categoria {getPaymentType(calculateAgeAtCamp(formData.birthDate))}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Transporte</label>
+                            <div className="flex bg-slate-800 p-1 rounded-xl sm:rounded-2xl border border-slate-700">
+                              {['Carro', 'Ônibus'].map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => setFormData({...formData, transport: t as any})}
+                                  className={cn(
+                                    "flex-1 py-2 sm:py-3 px-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-black uppercase transition-all",
+                                    formData.transport === t ? "bg-indigo-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                                  )}
+                                >
+                                  {t}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      {dep.birthDate && (
-                        <div className="flex justify-between items-center pt-2 border-t border-slate-700/50">
-                          <div className="text-[10px] font-medium text-slate-400">
-                            Idade: <span className="text-indigo-400 font-bold">{calculateAgeAtCamp(dep.birthDate)} anos</span>
+                      <div className="space-y-5 sm:space-y-6 pt-2 sm:pt-4">
+                         <div className="flex items-center justify-between mb-2 sm:mb-4">
+                            <div className="flex items-center gap-2">
+                              <Users size={14} className="text-purple-400" />
+                              <h3 className="text-[10px] sm:text-xs font-black text-white uppercase tracking-widest">Dependentes</h3>
+                            </div>
+                            <button 
+                              type="button"
+                              onClick={handleAddDependent}
+                              className="text-[8px] sm:text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-indigo-500/20 hover:bg-indigo-500/20 transition-all uppercase tracking-widest"
+                            >
+                              + Adicionar
+                            </button>
+                         </div>
+                         
+                         <div className="space-y-3 sm:space-y-4">
+                           {formData.dependents.map((dep) => (
+                             <div key={dep.id} className="bg-black/20 p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-800 relative group/dep">
+                               <button 
+                                 type="button"
+                                 onClick={() => setDeleteDependentModal({id: dep.id, name: dep.name})}
+                                 className="absolute -top-1.5 -right-1.5 p-1.5 bg-rose-500 text-white rounded-full shadow-lg sm:opacity-0 group-hover/dep:opacity-100 transition-all active:scale-90 z-10"
+                                >
+                                 <Trash2 size={10} />
+                               </button>
+                               <div className="space-y-3 sm:space-y-4">
+                                 <input 
+                                   type="text" 
+                                   placeholder="Nome do Dependente"
+                                   value={dep.name}
+                                   onChange={e => updateDependent(dep.id, 'name', e.target.value)}
+                                   className="w-full bg-slate-900/50 border border-slate-800 text-white p-2.5 sm:p-3 rounded-lg sm:rounded-xl outline-none font-bold text-xs"
+                                 />
+                                 <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                                   <div className="flex flex-col gap-1">
+                                     <input 
+                                       type="date" 
+                                       value={dep.birthDate}
+                                       onChange={e => updateDependent(dep.id, 'birthDate', e.target.value)}
+                                       className="bg-slate-900/50 border border-slate-800 text-white p-2.5 sm:p-3 rounded-lg sm:rounded-xl outline-none font-bold text-[10px]"
+                                     />
+                                     {dep.birthDate && (
+                                       <span className={cn(
+                                         "text-[8px] font-black uppercase ml-1",
+                                         getPaymentType(calculateAgeAtCamp(dep.birthDate)) === 'Inteira' ? "text-indigo-400" : 
+                                         getPaymentType(calculateAgeAtCamp(dep.birthDate)) === 'Meia' ? "text-emerald-400" : 
+                                         "text-slate-500"
+                                       )}>
+                                         {getPaymentType(calculateAgeAtCamp(dep.birthDate))}
+                                       </span>
+                                     )}
+                                   </div>
+                                   <select 
+                                     value={dep.relationship}
+                                     onChange={e => updateDependent(dep.id, 'relationship', e.target.value)}
+                                     className="bg-slate-900/50 border border-slate-800 text-slate-300 p-2.5 sm:p-3 rounded-lg sm:rounded-xl outline-none font-bold text-[10px]"
+                                   >
+                                     <option value="Cônjuge">Cônjuge</option>
+                                     <option value="Filho(a)">Filho(a)</option>
+                                     <option value="Pais">Pai / Mãe</option>
+                                     <option value="Outro">Outro</option>
+                                   </select>
+                                 </div>
+                               </div>
+                             </div>
+                           ))}
+                           {formData.dependents.length === 0 && (
+                             <div className="p-6 sm:p-8 border border-dashed border-slate-800 rounded-2xl sm:rounded-3xl text-center">
+                               <p className="text-[9px] sm:text-[10px] font-bold text-slate-600 uppercase tracking-widest">Sem dependentes</p>
+                             </div>
+                           )}
+                         </div>
+                      </div>
+                    </div>
+
+                    {/* Financial Plan */}
+                    <div className="space-y-6 sm:space-y-8">
+                      <div className="bg-slate-800/20 p-5 sm:p-8 rounded-3xl sm:rounded-[40px] border border-slate-800/50 space-y-6 sm:space-y-8">
+                        <div className="flex items-center gap-2">
+                          <CreditCard size={14} className="text-emerald-400" />
+                          <h3 className="text-[10px] sm:text-xs font-black text-white uppercase tracking-widest">Planejamento Financeiro</h3>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 sm:gap-6">
+                          <div className="space-y-1">
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Parcelas</label>
+                            <select 
+                              value={formData.installments}
+                              onChange={e => setFormData({...formData, installments: Number(e.target.value)})}
+                              className="w-full bg-slate-900 border border-slate-800 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl outline-none font-black text-sm"
+                            >
+                              {[...Array(getMaxInstallments())].map((_, i) => (
+                                <option key={i + 1} value={i + 1}>{i + 1}x</option>
+                              ))}
+                            </select>
                           </div>
-                          <div className="text-[10px] font-medium text-slate-400">
-                            Valor: <span className="text-emerald-400 font-bold">{getPaymentType(calculateAgeAtCamp(dep.birthDate))}</span>
+                          <div className="space-y-1">
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Vencimento</label>
+                            <select 
+                              value={formData.dueDay}
+                              onChange={e => setFormData({...formData, dueDay: Number(e.target.value)})}
+                              className="w-full bg-slate-900 border border-slate-800 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl outline-none font-black text-sm"
+                            >
+                              {[1, 5, 10, 15, 20, 25, 30].map(day => (
+                                <option key={day} value={day}>Dia {day}</option>
+                              ))}
+                            </select>
                           </div>
                         </div>
-                      )}
+
+                        <div className="pt-5 sm:pt-6 border-t border-slate-800 space-y-4">
+                           <div className="flex justify-between items-end">
+                             <div>
+                               <p className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5 leading-normal">Investimento Total</p>
+                               <p className="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
+                                 {formatCurrency(
+                                   getPaymentValue(
+                                     formData.birthDate ? getPaymentType(calculateAgeAtCamp(formData.birthDate)) : 'Inteira',
+                                     formData.transport
+                                   ) + 
+                                   formData.dependents.reduce((acc, dep) => acc + getPaymentValue(
+                                     dep.birthDate ? getPaymentType(calculateAgeAtCamp(dep.birthDate)) : 'Isento',
+                                     formData.transport
+                                   ), 0)
+                                 )}
+                               </p>
+                             </div>
+                             <div className="text-right">
+                               <p className="text-[8px] sm:text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-0.5 leading-normal">Parcela</p>
+                               <p className="text-lg sm:text-xl font-black text-indigo-300 leading-tight">
+                                 {formatCurrency(
+                                   (getPaymentValue(
+                                     formData.birthDate ? getPaymentType(calculateAgeAtCamp(formData.birthDate)) : 'Inteira',
+                                     formData.transport
+                                   ) + 
+                                   formData.dependents.reduce((acc, dep) => acc + getPaymentValue(
+                                     dep.birthDate ? getPaymentType(calculateAgeAtCamp(dep.birthDate)) : 'Isento',
+                                     formData.transport
+                                   ), 0)) / formData.installments
+                                 )}
+                               </p>
+                             </div>
+                           </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 sm:space-y-4">
+                        <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Observações</label>
+                        <textarea 
+                          placeholder="Notas sobre pagamento, restrições..."
+                          value={formData.observation}
+                          onChange={e => setFormData({...formData, observation: e.target.value})}
+                          className="w-full bg-slate-800 border border-slate-700 text-white p-4 rounded-2xl sm:rounded-3xl outline-none font-bold text-xs sm:text-sm resize-none h-24 sm:h-32 focus:ring-2 focus:ring-indigo-500/50"
+                        />
+                      </div>
                     </div>
-                  ))}
-                  {formData.dependents.length === 0 && (
-                    <div className="text-center py-4 text-xs font-medium text-slate-500 italic bg-slate-800/30 rounded-xl border border-dashed border-slate-700">
-                      Nenhum dependente adicionado.
-                    </div>
-                  )}
-                </div>
+                  </div>
+                </form>
               </div>
 
-              {/* Total Calculation Preview */}
-              <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-xl p-4 mt-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider">Valor Total (Família)</span>
-                  <span className="text-xl font-black text-white">
-                    {formatCurrency(
-                      getPaymentValue(
-                        formData.birthDate ? getPaymentType(calculateAgeAtCamp(formData.birthDate)) : 'Inteira',
-                        formData.transport
-                      ) + 
-                      formData.dependents.reduce((acc, dep) => acc + getPaymentValue(
-                        dep.birthDate ? getPaymentType(calculateAgeAtCamp(dep.birthDate)) : 'Isento',
-                        formData.transport
-                      ), 0)
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-6 sticky bottom-0 bg-slate-900 pb-2">
-                <button 
+              {/* Action Bar */}
+              <div className="p-4 sm:p-8 bg-black/40 border-t border-slate-800 flex justify-end gap-3 sm:gap-4">
+                 <button 
+                  onClick={() => { setShowForm(false); setEditingId(null); }}
+                  className="flex-1 sm:flex-none px-4 sm:px-8 py-3 sm:py-4 rounded-xl sm:rounded-2xl text-[10px] sm:text-xs font-black text-slate-400 hover:text-white uppercase tracking-widest transition-all"
+                 >
+                   Descartar
+                 </button>
+                 <button 
                   type="submit"
-                  className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all text-sm uppercase tracking-wider"
-                >
-                  {editingId ? 'Salvar Alterações' : 'Confirmar Inscrição'}
-                </button>
+                  form="participant-form"
+                  className="flex-2 sm:flex-none px-6 sm:px-10 py-3 sm:py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl sm:rounded-2xl shadow-xl shadow-indigo-900/40 uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 text-[10px] sm:text-xs"
+                 >
+                   <CheckCircle2 size={16} />
+                   <span>{editingId ? 'Salvar' : 'Concluir'}</span>
+                 </button>
               </div>
-            </form>
-          </motion.div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
-      <div className="space-y-3">
-        {filteredParticipants.length === 0 ? (
-          <div className="bg-slate-900 p-12 rounded-3xl border border-dashed border-slate-800 text-center">
-            <User className="mx-auto text-slate-700 mb-3" size={48} />
-            <p className="text-slate-500 font-medium">Nenhum participante encontrado.</p>
+      {/* Status Legend */}
+      <div className="flex flex-wrap gap-4 mb-4 px-4 py-3 bg-slate-900/50 rounded-2xl border border-slate-800/50 w-full sm:w-fit backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)]" />
+          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Pago</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.4)]" />
+          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Pendente</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.4)]" />
+          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Atrasado</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.4)]" />
+          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Isento</span>
+        </div>
+        <div className="flex-1" />
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-indigo-400" />
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Inteira</span>
           </div>
-        ) : (
-          filteredParticipants.map((p) => (
-            <motion.div 
-              layout
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              key={p.id} 
-              className="bg-slate-900 overflow-hidden rounded-2xl shadow-md border border-slate-800 active:border-slate-700 transition-colors"
-            >
-              <div 
-                className="p-3.5 flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer active:bg-slate-800 transition-colors gap-3"
-                onClick={() => {
-                  if (selectedParticipantId === p.id) {
-                    setSelectedParticipantId(null);
-                  } else {
-                    setSelectedParticipantId(p.id);
-                  }
-                }}
-              >
-                <div className="flex items-start sm:items-center gap-3 w-full sm:w-auto">
-                  <div className={cn(
-                    "w-12 h-12 sm:w-10 sm:h-10 rounded-2xl sm:rounded-full flex items-center justify-center font-black text-white shrink-0 shadow-inner",
-                    p.paymentType === 'Inteira' ? "bg-indigo-600" : p.paymentType === 'Meia' ? "bg-blue-500" : "bg-teal-500"
-                  )}>
-                    {p.name.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className={cn("font-bold text-base sm:text-sm leading-tight mb-0.5 truncate", getParticipantOverdue(p.id) ? "text-red-400" : "text-slate-100")}>{p.name}</h4>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest shrink-0">RG: {p.rg}</p>
-                      {p.phone && (
-                        <div className="flex items-center gap-1.5">
-                          <a 
-                            href={`https://wa.me/55${p.phone.replace(/\D/g, '')}`} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex items-center justify-center text-green-500 hover:text-green-400 transition-colors bg-green-500/10 p-1 rounded border border-green-500/20"
-                            title="Contato WhatsApp"
-                          >
-                            <Phone size={12} className="text-emerald-500" />
-                          </a>
-                          <div className="flex items-center bg-slate-800/50 rounded p-0.5 gap-1 border border-slate-700/50">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); sendWhatsAppReceipt(p, installmentsMap[p.id] || []); }}
-                              className="text-[10px] text-amber-400 font-black hover:text-amber-300 transition-colors uppercase px-1.5"
-                              title="Enviar Recibo via WhatsApp"
-                            >
-                              Recibo
-                            </button>
-                            <div className="w-[1px] h-3 bg-slate-700" />
-                            <button
-                              onClick={(e) => { e.stopPropagation(); generatePDFReceipt(p, installmentsMap[p.id] || []); }}
-                              className="text-[10px] text-indigo-400 font-black hover:text-indigo-300 transition-colors uppercase px-1.5"
-                              title="Baixar Recibo PDF"
-                            >
-                              PDF
-                            </button>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Meia</span>
+          </div>
+        </div>
+      </div>
+
+        <div className="grid grid-cols-1 gap-4">
+          {filteredParticipants.length === 0 ? (
+            <div className="bg-slate-900/50 p-20 rounded-[32px] border border-dashed border-slate-800 text-center">
+              <User className="mx-auto text-slate-800 mb-4" size={48} />
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Nenhum acamper encontrado</p>
+            </div>
+          ) : (
+            filteredParticipants.map(p => {
+              const isOverdue = getParticipantOverdue(p.id);
+              const overdueInfo = getParticipantOverdueDetails(p.id);
+              const isSelected = selectedParticipantId === p.id;
+              
+              return (
+                <motion.div 
+                  layout
+                  key={p.id}
+                  className={cn(
+                    "group relative bg-slate-900 border transition-all duration-300 rounded-[32px] overflow-hidden",
+                    isSelected ? "border-indigo-500/50 shadow-2xl shadow-indigo-900/20 ring-1 ring-indigo-500/20" : "border-slate-800 hover:border-slate-700 shadow-lg"
+                  )}
+                >
+                  <div 
+                    className="p-4 sm:p-8 cursor-pointer active:bg-slate-800/50 transition-colors"
+                    onClick={() => setSelectedParticipantId(isSelected ? null : p.id)}
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-6">
+                      <div className="flex items-center gap-3 sm:gap-5">
+                        <div className={cn(
+                          "w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 shadow-lg transition-transform group-hover:scale-105",
+                          p.isPaid ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/10" : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/10"
+                        )}>
+                          <User size={20} className="sm:w-7 sm:h-7" />
+                        </div>
+                        
+                        <div className="space-y-0.5 sm:space-y-1 flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm sm:text-xl font-black text-white tracking-normal leading-tight uppercase break-words">{p.name}</h3>
+                            <span className={cn(
+                              "text-[7px] sm:text-[9px] font-black uppercase px-1.5 py-0.5 sm:py-1 rounded-md sm:rounded-lg border shrink-0",
+                              p.isPaid ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : 
+                              isOverdue ? "bg-rose-500/10 text-rose-500 border-rose-500/20" : 
+                              "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                            )}>
+                              {p.isPaid ? 'PAGO' : isOverdue ? 'ATRASO' : 'OK'}
+                            </span>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                    {getParticipantOverdue(p.id) && (() => {
-                      const overdue = getParticipantOverdueDetails(p.id);
-                      if (!overdue) return null;
-                      return (
-                        <div className="mt-1.5 flex items-center gap-2 text-[9px] text-red-400 bg-red-500/10 px-2 py-1 rounded-lg w-fit border border-red-500/20 shadow-sm font-bold">
-                          <span className="uppercase">{overdue.daysOverdue} dias em atraso</span>
-                          <span className="opacity-30">|</span>
-                          <span>{formatDate(overdue.dueDate)}</span>
-                        </div>
-                      );
-                    })()}
-                    {p.observation && (
-                      <p className="text-[10px] text-amber-500/80 mt-1.5 italic flex items-center gap-1 bg-amber-500/10 px-2 py-1 rounded-lg w-fit border border-amber-500/20 max-w-full truncate">📝 {p.observation}</p>
-                    )}
-                    <div className="flex flex-wrap gap-1.5 mt-2.5">
-                      <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-1 rounded-lg font-black uppercase tracking-wider border border-slate-700/50">
-                        {p.ageAtCamp} anos
-                      </span>
-                      <span className={cn(
-                        "text-[9px] px-2 py-1 rounded-lg font-black uppercase tracking-wider border",
-                        p.paymentType === 'Inteira' ? "bg-indigo-950/50 text-indigo-400 border-indigo-900/30" : "bg-blue-950/50 text-blue-400 border-blue-900/30"
-                      )}>
-                        {p.paymentType}
-                      </span>
-                      <span className={cn(
-                        "text-[9px] px-2 py-1 rounded-lg font-black uppercase tracking-wider border",
-                        p.transport === 'Carro' ? "bg-emerald-950/50 text-emerald-400 border-emerald-900/30" : "bg-amber-950/50 text-amber-400 border-amber-900/30"
-                      )}>
-                        {p.transport}
-                      </span>
-                      {p.dependents && p.dependents.length > 0 && (
-                        <span className="text-[9px] bg-purple-900/30 text-purple-300 px-2 py-1 rounded-lg font-black uppercase tracking-wider border border-purple-900/20 flex items-center gap-1">
-                          <Users size={10} /> +{p.dependents.length}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-0 border-slate-800/50 gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      {getParticipantOverdue(p.id) && (
-                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
-                      )}
-                      <span className={cn(
-                        "px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ring-1 ring-inset",
-                        p.isPaid || (!p.totalValue || p.totalValue === 0)
-                          ? "bg-green-500/10 text-green-400 ring-green-500/20" 
-                          : getParticipantOverdue(p.id)
-                            ? "bg-red-500/10 text-red-500 ring-red-500/20"
-                            : "bg-blue-500/10 text-blue-400 ring-blue-500/20"
-                      )}>
-                        {(!p.totalValue || p.totalValue === 0) ? 'Isento' : p.isPaid ? 'Pago' : getParticipantOverdue(p.id) ? 'Atrasado' : 'Em Dia'}
-                      </span>
-                    </div>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleEditParticipant(p); }}
-                      className="p-2 text-slate-500 hover:text-indigo-400 transition-colors bg-slate-800/50 rounded-lg border border-slate-700/50"
-                      title="Editar Acamper"
-                    >
-                      <Edit3 size={16} />
-                    </button>
-                    <ChevronRight size={18} className={cn("text-slate-600 transition-transform hidden sm:block", selectedParticipantId === p.id && "rotate-90")} />
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); setSelectedParticipantId(selectedParticipantId === p.id ? null : p.id); }}
-                      className="sm:hidden text-indigo-400 font-bold text-xs uppercase underline underline-offset-4"
-                    >
-                      {selectedParticipantId === p.id ? 'Fechar' : 'Detalhes'}
-                    </button>
-                  </div>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setDeleteParticipantModal({id: p.id, name: p.name}); }}
-                    className="text-slate-600 hover:text-red-500 p-2 transition-colors bg-slate-800/50 sm:bg-transparent rounded-lg"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              </div>
-
-              <AnimatePresence>
-                {selectedParticipantId === p.id && (
-                  <motion.div 
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="border-t border-slate-800 bg-slate-900/50"
-                  >
-                    <div className="p-4 space-y-6">
-                      {/* Financial Status Summary */}
-                      <div className="flex justify-between items-center">
-                        <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                          <CreditCard size={12} /> Resumo Financeiro
-                        </h5>
-                        <div className="flex gap-2">
-                          {p.phone && (
-                            <a 
-                              href={`https://wa.me/55${p.phone.replace(/\D/g, '')}`} 
-                              target="_blank" 
-                              rel="noreferrer"
-                              className="text-green-500 bg-green-500/10 p-2 rounded-lg border border-green-500/20 flex items-center justify-center hover:bg-green-500/20 transition-all"
-                              title="Mensagem WhatsApp"
-                            >
-                              <Phone size={14} className="text-emerald-500" />
-                            </a>
-                          )}
-                          <button
-                            onClick={() => sendWhatsAppReceipt(p, installmentsMap[p.id] || [])}
-                            className="text-[10px] font-black text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20 flex items-center gap-1 hover:bg-amber-500/20 transition-all"
-                          >
-                            <Receipt size={12} /> Recibo
-                          </button>
-                          <button
-                            onClick={() => generatePDFReceipt(p, installmentsMap[p.id] || [])}
-                            className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-lg border border-indigo-500/20 flex items-center gap-1 hover:bg-indigo-500/20 transition-all"
-                          >
-                            <FileText size={12} /> Recibo PDF
-                          </button>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 shadow-inner">
-                          <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Total Família</p>
-                          <p className="text-sm font-black text-slate-100">{formatCurrency(p.totalValue || 0)}</p>
-                        </div>
-                        <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 shadow-inner">
-                          <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Pago</p>
-                          <p className="text-sm font-black text-emerald-400">
-                            {formatCurrency(installmentsMap[p.id]?.reduce((acc, i) => acc + (i.paidAmount || 0), 0) || 0)}
-                          </p>
-                        </div>
-                        <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 shadow-inner">
-                          <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Restante</p>
-                          <p className="text-sm font-black text-blue-400">
-                            {formatCurrency(Math.max((p.totalValue || 0) - (installmentsMap[p.id]?.reduce((acc, i) => acc + (i.paidAmount || 0), 0) || 0), 0))}
-                          </p>
-                        </div>
-                        <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 shadow-inner">
-                          <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Parcelas</p>
-                          <p className="text-sm font-black text-indigo-400">{p.installments}x de {formatCurrency((p.totalValue || 0) / (p.installments || 1))}</p>
-                        </div>
-                      </div>
-
-                      {/* Dependents list if any */}
-                      {p.dependents && p.dependents.length > 0 && (
-                        <div className="space-y-2">
-                          <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <Users size={12} /> Dependentes
-                          </h5>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {p.dependents.map(dep => (
-                              <div key={dep.id} className="bg-slate-800/30 p-2 rounded-xl border border-slate-800 flex justify-between items-center">
-                                <div>
-                                  <p className="text-xs font-bold text-slate-200">{dep.name}</p>
-                                  <p className="text-[10px] text-slate-500">{dep.relationship} • {dep.ageAtCamp} anos</p>
-                                </div>
-                                <span className="text-[9px] bg-slate-900/50 px-2 py-1 rounded-lg text-slate-400 font-bold border border-slate-800">
-                                  {dep.paymentType}
+                          
+                          <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-6 gap-y-0.5 sm:gap-y-2 pt-0.5 sm:pt-1">
+                            <div className="flex items-center gap-1">
+                              <IdCard size={10} className="text-slate-500 sm:w-[14px] sm:h-[14px]" />
+                              <span className="text-[9px] sm:text-[11px] font-bold text-slate-400">{p.rg}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <CalendarIcon size={10} className="text-slate-500 sm:w-[14px] sm:h-[14px]" />
+                              <span className="text-[9px] sm:text-[11px] font-bold text-slate-400">{calculateAgeAtCamp(p.birthDate)}A</span>
+                            </div>
+                            {p.birthDate && (
+                              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-800/50 border border-slate-700/50">
+                                <div className={cn(
+                                  "w-1.5 h-1.5 rounded-full",
+                                  getPaymentType(calculateAgeAtCamp(p.birthDate)) === 'Inteira' ? "bg-indigo-400" : "bg-emerald-400"
+                                )} />
+                                <span className={cn(
+                                  "text-[8px] sm:text-[9px] font-black uppercase tracking-wider",
+                                  getPaymentType(calculateAgeAtCamp(p.birthDate)) === 'Inteira' ? "text-indigo-400" : "text-emerald-400"
+                                )}>
+                                  {getPaymentType(calculateAgeAtCamp(p.birthDate))}
                                 </span>
                               </div>
-                            ))}
+                            )}
                           </div>
                         </div>
-                      )}
+                      </div>
 
-                      {/* Installments Table/List */}
-                      <div className="space-y-3">
-                        <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                          <Receipt size={12} /> Fluxo de Pagamentos
-                        </h5>
-                        <div className="space-y-2 max-h-96 overflow-y-auto pr-1 no-scrollbar sm:custom-scrollbar">
-                          {installmentsMap[p.id]?.map((inst) => {
-                            const status = getInstallmentStatus(inst);
-                            return (
-                              <div key={inst.id} className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 group hover:border-slate-700 transition-colors">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-500 group-hover:bg-slate-700 transition-colors">
-                                    {inst.month.split('-')[1]}/{inst.month.split('-')[0].substring(2)}
-                                  </div>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <p className="text-xs font-black text-slate-100">{formatCurrency(inst.amount)}</p>
-                                      <span className={cn("text-[9px] px-2 py-0.5 rounded-md font-bold border", status.class)}>
-                                        {status.label}
-                                      </span>
-                                    </div>
-                                    <p className="text-[10px] text-slate-500 font-bold">Vence em {formatDate(inst.dueDate)}</p>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-800/50">
-                                  <div className="flex-1 sm:flex-none">
-                                    <p className="text-[9px] text-slate-500 font-bold uppercase leading-none mb-1">Pago</p>
-                                    <p className={cn("text-xs font-black", (inst.paidAmount || 0) >= inst.amount ? "text-emerald-400" : (inst.paidAmount || 0) > 0 ? "text-blue-400" : "text-slate-600")}>
-                                      {formatCurrency(inst.paidAmount || 0)}
-                                    </p>
-                                  </div>
-
-                                  <div className="flex items-center gap-1">
-                                    <button 
-                                      onClick={() => openPartialPayment(p.id, inst)}
-                                      className="p-2 bg-slate-800 text-slate-400 rounded-lg hover:text-indigo-400 transition-colors"
-                                      title="Pagamento Parcial"
-                                    >
-                                      <Receipt size={16} />
-                                    </button>
-                                    <button 
-                                      onClick={() => openUpdateObservation(inst.id, inst.observation || '')}
-                                      className={cn(
-                                        "p-2 rounded-lg transition-colors",
-                                        inst.observation ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400 hover:text-amber-500"
-                                      )}
-                                      title="Observação"
-                                    >
-                                      <Edit3 size={16} />
-                                    </button>
-                                    <button 
-                                      onClick={() => toggleInstallment(p.id, inst.id, inst.isPaid, inst.amount)}
-                                      className={cn(
-                                        "p-2 rounded-lg transition-all active:scale-90",
-                                        inst.isPaid ? "bg-green-500/10 text-green-500" : "bg-slate-800 text-slate-500 hover:text-green-500"
-                                      )}
-                                      title={inst.isPaid ? "Marcar como não pago" : "Marcar como pago"}
-                                    >
-                                      <CheckCircle2 size={16} />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
+                      <div className="flex items-center justify-between lg:justify-end gap-4 sm:gap-8 border-t lg:border-t-0 border-slate-800/50 pt-3 lg:pt-0">
+                        <div className="text-left lg:text-right">
+                          <p className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5 sm:mb-1 leading-normal">Total</p>
+                          <p className="text-lg sm:text-2xl font-black text-white leading-tight">{formatCurrency(p.totalValue || 0)}</p>
+                        </div>
+                        
+                        <div className="flex items-center gap-1 sm:gap-2">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleEditParticipant(p); }}
+                            className="p-2 sm:p-3 bg-slate-800 hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-400 rounded-lg sm:rounded-2xl transition-all"
+                            title="Editar"
+                          >
+                            <Edit3 size={14} className="sm:w-[18px] sm:h-[18px]" />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setDeleteParticipantModal({id: p.id, name: p.name}); }}
+                            className="p-2 sm:p-3 bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg sm:rounded-2xl transition-all"
+                            title="Excluir"
+                          >
+                            <Trash2 size={14} className="sm:w-[18px] sm:h-[18px]" />
+                          </button>
+                          <div className={cn(
+                            "p-1 sm:p-2 rounded-lg transition-transform duration-300",
+                            isSelected ? "rotate-90 text-indigo-400" : "text-slate-600"
+                          )}>
+                            <ChevronRight size={18} className="sm:w-6 sm:h-6" />
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          ))
-        )}
-      </div>
+
+                    {isOverdue && overdueInfo && (
+                      <div className="mt-6 bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-500">
+                            <AlertCircle size={20} className="animate-pulse" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-rose-500 uppercase tracking-widest">Pendência Crítica</p>
+                            <p className="text-[11px] font-bold text-rose-400/80 mt-0.5">
+                              {overdueInfo.count} parcela(s) vencida(s) há {overdueInfo.daysOverdue} dias.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] font-black text-slate-500 uppercase">Total em Atraso</p>
+                          <p className="text-lg font-black text-rose-500">{formatCurrency(overdueInfo.amount)}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <AnimatePresence>
+                    {isSelected && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="border-t border-slate-800 bg-black/20"
+                      >
+                        <div className="p-6 sm:p-8 space-y-8">
+                          {/* Dependents Detail */}
+                          {p.dependents && p.dependents.length > 0 && (
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-2">
+                                <Users className="text-indigo-400" size={18} />
+                                <h4 className="text-sm font-black text-white uppercase tracking-tighter">Dependentes Familiares</h4>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {p.dependents.map(dep => (
+                                  <div key={dep.id} className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700/50">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <p className="text-sm font-bold text-white">{dep.name}</p>
+                                      <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">{dep.relationship}</span>
+                                    </div>
+                                    <div className="flex justify-between items-end">
+                                      <div>
+                                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Idade 2028</p>
+                                        <p className="text-sm font-black text-indigo-400">{dep.ageAtCamp} Anos</p>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Categoria</p>
+                                        <p className={cn(
+                                          "text-sm font-black",
+                                          dep.paymentType === 'Inteira' ? "text-indigo-400" : 
+                                          dep.paymentType === 'Meia' ? "text-emerald-400" : 
+                                          "text-slate-300"
+                                        )}>{dep.paymentType}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Logistics & Payment Detail */}
+                          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                            <div className="lg:col-span-4 space-y-6">
+                              <div className="bg-slate-800/40 p-6 rounded-3xl border border-slate-700/50">
+                                <h4 className="text-xs font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2">
+                                  <Rocket size={14} className="text-blue-400" /> Logística de Viagem
+                                </h4>
+                                <div className="flex items-center gap-4">
+                                  <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/10">
+                                    {p.transport === 'Ônibus' ? <Users size={24} /> : <Car size={24} />}
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Modalidade</p>
+                                    <p className="text-xl font-black text-white">{p.transport}</p>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="bg-slate-800/40 p-6 rounded-3xl border border-slate-700/50">
+                                <h4 className="text-xs font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2">
+                                  <Receipt size={14} className="text-emerald-400" /> Ações de Recibo
+                                </h4>
+                                <div className="grid grid-cols-3 gap-3">
+                                  <button 
+                                    onClick={() => generatePDFReceipt(p, installmentsMap[p.id] || [])}
+                                    className="flex flex-col items-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-white"
+                                    title="Recibo"
+                                  >
+                                    <Download size={20} />
+                                    <span className="text-[8px] font-black uppercase">Recibo</span>
+                                  </button>
+                                  <button 
+                                    onClick={() => generatePaymentBooklet(p, installmentsMap[p.id] || [])}
+                                    className="flex flex-col items-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-blue-400"
+                                    title="Gerar Carnê"
+                                  >
+                                    <FileStack size={20} />
+                                    <span className="text-[8px] font-black uppercase">Carnê</span>
+                                  </button>
+                                  <button 
+                                    onClick={() => sendWhatsAppReceipt(p, installmentsMap[p.id] || [])}
+                                    className="flex flex-col items-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-emerald-400"
+                                    title="WhatsApp"
+                                  >
+                                    <Phone size={20} />
+                                    <span className="text-[8px] font-black uppercase">WhatsApp</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="lg:col-span-8">
+                                <div className="bg-black/30 rounded-3xl border border-slate-800 p-4 sm:p-8 overflow-hidden">
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                                    <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                      <CreditCard size={14} className="text-indigo-400" /> Extrato de Parcelas
+                                    </h4>
+                                    <div className="text-left sm:text-right bg-slate-900/50 sm:bg-transparent p-3 sm:p-0 rounded-2xl sm:rounded-none w-full sm:w-auto border border-slate-800 sm:border-0">
+                                      <p className="text-[10px] font-black text-slate-500 uppercase">Plano</p>
+                                      <p className="text-xs sm:text-sm font-black text-indigo-400">{p.installments}x de {formatCurrency((p.totalValue || 0) / (p.installments || 1))}</p>
+                                    </div>
+                                  </div>
+                                
+                                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar no-scrollbar">
+                                  {(installmentsMap[p.id] || []).map(inst => {
+                                    const status = getInstallmentStatus(inst);
+                                    return (
+                                      <div key={inst.id} className="bg-slate-900/50 p-3 sm:p-4 rounded-2xl border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group/inst">
+                                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                                          <div className={cn(
+                                            "w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0",
+                                            inst.isPaid ? "bg-emerald-500/10 text-emerald-500" : "bg-slate-800 text-slate-500"
+                                          )}>
+                                            {inst.isPaid ? <CheckCircle2 size={18} /> : inst.month.split('-')[1]}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="text-[11px] font-black text-white leading-none mb-1">{inst.month}</p>
+                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Vence {formatDate(inst.dueDate)}</p>
+                                          </div>
+                                        </div>
+                                        
+                                        <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 w-full sm:w-auto pt-3 sm:pt-0 border-t border-slate-800/50 sm:border-0">
+                                          <div className="text-left sm:text-right">
+                                            <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase leading-none mb-1">Pago</p>
+                                            <p className="text-xs sm:text-sm font-black text-white">{formatCurrency(inst.paidAmount || 0)}</p>
+                                          </div>
+                                          
+                                          <div className="flex items-center gap-1.5 sm:gap-2">
+                                            <button 
+                                              onClick={() => setConfirmStatusModal({
+                                                participantId: p.id,
+                                                installmentId: inst.id,
+                                                currentPaid: inst.isPaid,
+                                                amount: inst.amount,
+                                                month: inst.month,
+                                                participantName: p.name
+                                              })}
+                                              className={cn(
+                                                "p-2 sm:p-2.5 rounded-xl transition-all",
+                                                inst.isPaid ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-500 hover:bg-emerald-500/20 hover:text-emerald-400"
+                                              )}
+                                              title={inst.isPaid ? "Marcar como pendente" : "Marcar como pago"}
+                                            >
+                                              <CheckCircle2 size={18} />
+                                            </button>
+                                            <button 
+                                              onClick={() => openPartialPayment(p.id, inst)}
+                                              className="p-2 sm:p-2.5 bg-slate-800 text-slate-500 hover:bg-blue-500/20 hover:text-blue-400 rounded-xl transition-all"
+                                              title="Pagamento Parcial"
+                                            >
+                                              <CreditCard size={18} />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              );
+            })
+          )}
+        </div>
       
       {/* Modals */}
       <AnimatePresence>
@@ -1415,6 +1665,38 @@ const Participantes: React.FC = () => {
         }}
         onCancel={() => setDeleteParticipantModal(null)}
       />
+
+      <ConfirmModal
+        isOpen={!!confirmStatusModal}
+        title="Confirmar Alteração de Status"
+        message={confirmStatusModal?.currentPaid 
+          ? `Deseja realmente marcar a parcela de ${confirmStatusModal?.month} de ${confirmStatusModal?.participantName} como NÃO PAGA?` 
+          : `Deseja confirmar o recebimento da parcela de ${confirmStatusModal?.month} de ${confirmStatusModal?.participantName}?`}
+        confirmText="Confirmar"
+        onConfirm={() => {
+          if (confirmStatusModal) {
+            toggleInstallment(
+              confirmStatusModal.participantId,
+              confirmStatusModal.installmentId,
+              confirmStatusModal.currentPaid,
+              confirmStatusModal.amount
+            );
+          }
+        }}
+        onCancel={() => setConfirmStatusModal(null)}
+      />
+
+      {/* Floating Action Button */}
+      <button 
+        onClick={() => {
+          setEditingId(null);
+          setFormData({ name: '', rg: '', phone: '', birthDate: '', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
+          setShowForm(true);
+        }}
+        className="fixed bottom-24 right-6 w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-2xl shadow-indigo-900/40 flex items-center justify-center z-40 active:scale-90 transition-transform hover:bg-indigo-500 md:bottom-10"
+      >
+        <Plus size={28} />
+      </button>
     </div>
   );
 };

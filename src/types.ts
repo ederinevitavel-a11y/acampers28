@@ -137,4 +137,4 @@ export interface Participant {
   timestamp: number;
 }
 
-export type AppTab = 'dashboard' | 'sabor' | 'brilho' | 'conecta' | 'brasa' | 'bencao' | 'financeiro' | 'participantes';
+export type AppTab = 'dashboard' | 'participantes';

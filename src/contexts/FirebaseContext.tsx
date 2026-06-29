@@ -23,20 +23,31 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check for redirect result
-    getRedirectResult(auth)
-      .then((result) => {
+    // Check for redirect result immediately
+    const handleRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
         if (result?.user) {
-          console.log("Redirect sign-in successful", result.user.email);
+          console.log("Login por redirecionamento bem-sucedido:", result.user.email);
+          setUser(result.user);
         }
-      })
-      .catch(err => {
-        console.error("Error getting redirect result", err);
-        setError("Erro ao processar login por redirecionamento: " + err.message);
-      });
+      } catch (err: any) {
+        console.error("Erro ao processar resultado do redirecionamento", err);
+        // Don't set global error for common background failures
+        if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+          setError("Erro ao processar login: " + err.message);
+        }
+      }
+    };
+
+    handleRedirect();
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
+      setLoading(false);
+    }, (err) => {
+      console.error("Erro na mudança de estado de autenticação", err);
+      setError(err.message);
       setLoading(false);
     });
     return unsubscribe;

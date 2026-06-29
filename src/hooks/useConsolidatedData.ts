@@ -14,29 +14,16 @@ import {
 
 export function useConsolidatedData() {
   const [data, setData] = useState({
-    sabor: [] as SaborCentralEntry[],
-    brasa: [] as BrasaGracaEntry[],
-    brilho: [] as BrilhoCelesteWash[],
-    brilhoClients: [] as BrilhoCelesteClient[],
-    brilhoExpenses: [] as BrilhoCelesteExpense[],
-    conecta: [] as ConectaCentralEvent[],
-    bencao: [] as RecebaSuabencaoRaffle[],
     participants: [] as Participant[],
     installments: [] as Installment[],
-    loading: true
+    loading: true,
+    error: null as string | null
   });
 
   useEffect(() => {
     const unsubscribers: (() => void)[] = [];
 
     const collections = [
-      { name: 'sabor_central', key: 'sabor' },
-      { name: 'brasa_graca', key: 'brasa' },
-      { name: 'brilho_celeste', key: 'brilho' },
-      { name: 'brilho_celeste_clients', key: 'brilhoClients' },
-      { name: 'brilho_celeste_expenses', key: 'brilhoExpenses' },
-      { name: 'conecta_central', key: 'conecta' },
-      { name: 'receba_bencao', key: 'bencao' },
       { name: 'participants', key: 'participants' },
       { name: 'installments', key: 'installments' },
     ];
@@ -53,12 +40,15 @@ export function useConsolidatedData() {
           const newData = { ...prev, [col.key]: docs };
           return {
             ...newData,
-            loading: loadedCount < totalCols - 1 ? true : false
+            loading: loadedCount < totalCols - 1 ? true : false,
+            error: null
           };
         });
         loadedCount++;
       }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, col.name);
+        console.error(`Erro ao carregar coleção ${col.name}:`, error);
+        setData(prev => ({ ...prev, loading: false, error: error.message }));
+        // handleFirestoreError(error, OperationType.LIST, col.name); // Avoid throwing to prevent crash
       });
       unsubscribers.push(unsub);
     });

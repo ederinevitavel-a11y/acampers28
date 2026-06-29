@@ -1,499 +1,501 @@
-import React, { useState } from 'react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Legend, AreaChart, Area, PieChart, Pie, Cell, ComposedChart, Line, ReferenceLine
-} from 'recharts';
+import React, { useMemo } from 'react';
 import { formatCurrency, cn, formatDate } from '../lib/utils';
-import { TrendingUp, DollarSign, Calendar as CalendarIcon, Bell, Target, Rocket, Clock, Filter, CreditCard, Flame, Droplets, Ticket, Home } from 'lucide-react';
+import { 
+  DollarSign, Bell, Rocket, Home, Users, 
+  Car, TrendingUp, AlertTriangle, CheckCircle2,
+  ChevronRight, BarChart3, Target, AlertCircle
+} from 'lucide-react';
 import { useConsolidatedData } from '../hooks/useConsolidatedData';
 import { motion } from 'motion/react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  PieChart, Pie, Cell, AreaChart, Area
+} from 'recharts';
 
 const Dashboard: React.FC = () => {
-  const { sabor, brasa, brilho, brilhoClients, brilhoExpenses, conecta, bencao, installments, loading } = useConsolidatedData();
-  const [selectedProject, setSelectedProject] = useState<string>('Todos');
+  const { installments, participants, loading, error } = useConsolidatedData();
+
+  // Camp Date: Jan 29, 2028
+  const CAMP_DATE = new Date('2028-01-29T00:00:00');
+  const DEPARTURE_DATE = new Date('2028-01-28T19:00:00');
+  const today = new Date('2026-05-24'); // Context time
+  const diffTime = CAMP_DATE.getTime() - today.getTime();
+  const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  const calculateAge = (birthDateStr: string) => {
+    if (!birthDateStr) return 0;
+    const birthDate = new Date(birthDateStr);
+    let age = CAMP_DATE.getFullYear() - birthDate.getFullYear();
+    const monthDiff = CAMP_DATE.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && CAMP_DATE.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  const getType = (age: number) => {
+    if (age <= 5) return 'Isento';
+    if (age <= 10) return 'Meia';
+    return 'Inteira';
+  };
+
+  // Data Processing
+  const analytics = useMemo(() => {
+    const breakdown = {
+      inteira: 0,
+      meia: 0,
+      isento: 0,
+      onibus: 0,
+      carro: 0,
+      numCarros: 0
+    };
+
+    participants.forEach(p => {
+      // Use stored paymentType if available, fallback to age calculation
+      const type = p.paymentType || getType(calculateAge(p.birthDate));
+      if (type === 'Inteira') breakdown.inteira++;
+      else if (type === 'Meia') breakdown.meia++;
+      else breakdown.isento++;
+
+      if (p.transport === 'Ônibus') breakdown.onibus++;
+      else if (p.transport === 'Carro') {
+        breakdown.carro++;
+        breakdown.numCarros++;
+      }
+
+      p.dependents?.forEach(d => {
+        const dType = d.paymentType || getType(calculateAge(d.birthDate));
+        if (dType === 'Inteira') breakdown.inteira++;
+        else if (dType === 'Meia') breakdown.meia++;
+        else breakdown.isento++;
+
+        if (p.transport === 'Ônibus') breakdown.onibus++;
+        else if (p.transport === 'Carro') breakdown.carro++;
+      });
+    });
+
+    const totalCollected = installments.reduce((acc, curr) => acc + (curr.paidAmount || (curr.isPaid ? curr.amount : 0)), 0);
+    const totalExpected = installments.reduce((acc, curr) => acc + curr.amount, 0);
+    const collectionProgress = (totalCollected / (totalExpected || 1)) * 100;
+
+    const monthlyData: { [key: string]: { month: string, collected: number, expected: number } } = {};
+    installments.forEach(inst => {
+      if (!monthlyData[inst.month]) {
+        monthlyData[inst.month] = { month: inst.month, collected: 0, expected: 0 };
+      }
+      monthlyData[inst.month].expected += inst.amount;
+      if (inst.isPaid) {
+        monthlyData[inst.month].collected += inst.amount;
+      } else {
+        monthlyData[inst.month].collected += (inst.paidAmount || 0);
+      }
+    });
+
+    const flowChartData = Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month));
+
+    const ageData = [
+      { name: 'Inteira', value: breakdown.inteira, color: '#A855F7' },
+      { name: 'Meia', value: breakdown.meia, color: '#38BDF8' },
+      { name: 'Isento', value: breakdown.isento, color: '#10B981' }
+    ];
+
+    const todayStart = new Date(today);
+    todayStart.setHours(0,0,0,0);
+
+    const paidCount = participants.filter(p => p.isPaid || (p.totalValue === 0)).length;
+    
+    const overdueCount = participants.filter(p => {
+      if (p.isPaid || p.totalValue === 0) return false;
+      return installments.some(inst => 
+        inst.participantId === p.id && 
+        !inst.isPaid && 
+        new Date(inst.dueDate + 'T12:00:00') < todayStart
+      );
+    }).length;
+
+    return {
+      breakdown,
+      totalCollected,
+      totalExpected,
+      collectionProgress,
+      flowChartData,
+      ageData,
+      overdueCount,
+      paidCount,
+      totalInscritos: participants.length + participants.reduce((acc, curr) => acc + (curr.dependents?.length || 0), 0)
+    };
+  }, [participants, installments, today]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen bg-black">
         <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
-  // Calculate project totals
-  const totalInstallments = installments.reduce((acc, curr) => acc + (curr.paidAmount || (curr.isPaid ? curr.amount : 0)), 0);
-  
-  // Refined Brilho Celeste calculation
-  const totalBrilhoRevenue = brilho.filter(w => !w.clientId).reduce((acc, curr) => acc + curr.packagePrice, 0) + 
-                             brilhoClients.reduce((acc, curr) => acc + curr.packagePrice, 0);
-  const totalBrilhoReceived = brilho.filter(w => !w.clientId && w.isPaid).reduce((acc, curr) => acc + curr.packagePrice, 0) + 
-                              brilhoClients.filter(c => c.isPaid).reduce((acc, curr) => acc + curr.packagePrice, 0);
-  const totalBrilhoExpense = brilhoExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-black p-4 text-center">
+        <div className="w-16 h-16 bg-red-950 text-red-400 rounded-full flex items-center justify-center mb-6">
+          <AlertTriangle size={32} />
+        </div>
+        <h2 className="text-xl font-bold text-white mb-2">Erro de Conexão</h2>
+        <p className="text-slate-400 max-w-md mb-6">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-xl transition-colors"
+        >
+          Tentar Novamente
+        </button>
+      </div>
+    );
+  }
 
-  const globalProjectTotals = [
-    { name: 'Sabor', value: sabor.reduce((acc, curr) => acc + curr.totalRevenue, 0), expense: sabor.reduce((acc, curr) => acc + curr.totalCost, 0), color: '#3b82f6', count: sabor.length },
-    { name: 'Brilho', value: totalBrilhoRevenue, expense: totalBrilhoExpense, color: '#10b981', count: brilho.length + brilhoClients.length },
-    { name: 'Conecta', value: conecta.reduce((acc, curr) => acc + curr.totalRevenue, 0), expense: conecta.reduce((acc, curr) => acc + curr.totalExpense, 0), color: '#8b5cf6', count: conecta.length },
-    { name: 'Brasa', value: brasa.reduce((acc, curr) => acc + curr.totalRevenue, 0), expense: brasa.reduce((acc, curr) => acc + curr.totalCost, 0), color: '#f59e0b', count: brasa.length },
-    { name: 'Bênção', value: bencao.reduce((acc, curr) => acc + curr.totalRevenue, 0), expense: 0, color: '#f43f5e', count: bencao.length },
-    { name: 'Acampamento', value: totalInstallments, expense: 0, color: '#6366f1', count: installments.length },
-  ];
+  const BUS_CAPACITY = 46;
+  const busesNeeded = Math.ceil(analytics.breakdown.onibus / BUS_CAPACITY);
+  const busOccupancyRate = (analytics.breakdown.onibus / (busesNeeded * BUS_CAPACITY || 1)) * 100;
 
-  const projectTotals = selectedProject === 'Todos' 
-    ? globalProjectTotals 
-    : globalProjectTotals.filter(p => p.name === selectedProject);
-
-  // Goals
-  const META_ROOF = 50000;
-  const META_MOON = 75000;
-
-  // Calculate monthly data for the chart
-  const monthlyData: Record<string, { Sabor: number, Brilho: number, Conecta: number, Brasa: number, Bencao: number, Acampamento: number, total: number }> = {};
-
-  const processMonthlyItem = (dateStr: string | undefined, type: string, value: number) => {
-    if (!dateStr) return;
-    const month = dateStr.substring(0, 7); // YYYY-MM
-    if (!monthlyData[month]) {
-      monthlyData[month] = { Sabor: 0, Brilho: 0, Conecta: 0, Brasa: 0, Bencao: 0, Acampamento: 0, total: 0 };
-    }
-    // @ts-ignore
-    monthlyData[month][type] += value;
-    monthlyData[month].total += value;
-  };
-
-  sabor.forEach(item => processMonthlyItem(item.date, 'Sabor', item.totalRevenue));
-  conecta.forEach(item => processMonthlyItem(item.date, 'Conecta', item.totalRevenue));
-  brasa.forEach(item => processMonthlyItem(item.date, 'Brasa', item.totalRevenue));
-  bencao.forEach(item => processMonthlyItem(item.date, 'Bencao', item.totalRevenue));
-  brilho.forEach(item => processMonthlyItem(item.date, 'Brilho', item.packagePrice));
-  installments.forEach(item => {
-    const amount = item.paidAmount || (item.isPaid ? item.amount : 0);
-    processMonthlyItem(item.dueDate || item.month, 'Acampamento', amount); 
-  });
-
-  const sortedMonths = Object.keys(monthlyData).sort();
-  const startMonth = sortedMonths[0] || '2026-05';
-  
-  const parseYearMonth = (ym: string) => {
-    const [y, m] = ym.split('-');
-    return parseInt(y) * 12 + parseInt(m) - 1;
-  };
-  
-  const startM = parseYearMonth(startMonth);
-  // Assumir finalização da campanha no final de 2027
-  const endM = parseYearMonth('2027-12'); 
-  const totalMonthsForGoal = Math.max(endM - startM + 1, 1);
-  const goalPerMonth = META_ROOF / totalMonthsForGoal;
-
-  let cumulative = 0;
-  
-  const chartData = sortedMonths.map((month) => {
-    cumulative += monthlyData[month].total;
-    const currentM = parseYearMonth(month);
-    const expectedCumulative = (currentM - startM + 1) * goalPerMonth;
-
-    const split = month.split('-');
-    const date = new Date(parseInt(split[0]), parseInt(split[1]) - 1, 1);
-    const monthName = date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-
-    return {
-      monthFull: month,
-      month: monthName,
-      ...monthlyData[month],
-      Acumulado: cumulative,
-      MetaEsperada: parseFloat(expectedCumulative.toFixed(2))
-    };
-  });
-
-  const globalTotalRevenue = globalProjectTotals.reduce((acc, curr) => acc + curr.value, 0);
-  const totalRevenue = projectTotals.reduce((acc, curr) => acc + curr.value, 0);
-  const totalExpense = projectTotals.reduce((acc, curr) => acc + curr.expense, 0);
-  const totalCount = projectTotals.reduce((acc, curr) => acc + curr.count, 0);
-  const totalBalance = totalRevenue - totalExpense;
-
-  const roofProgress = Math.min((globalTotalRevenue / META_ROOF) * 100, 100);
-  const moonProgress = Math.min((globalTotalRevenue / META_MOON) * 100, 100);
-  const leftForRoof = Math.max(META_ROOF - globalTotalRevenue, 0);
-  const leftForMoon = Math.max(META_MOON - globalTotalRevenue, 0);
-
-  // Collection reminders (due in next 7 days or overdue)
-  const today = new Date('2026-05-24'); // Fixed for this context
   const nextWeek = new Date(today);
   nextWeek.setDate(today.getDate() + 7);
 
-  const pendingCollections = [
-    ...installments.filter(inst => {
-      if (inst.isPaid) return false;
-      const dueDate = new Date(inst.dueDate);
-      return dueDate <= nextWeek;
-    }).map(inst => ({
-      id: inst.id,
-      name: inst.participantName,
-      amount: inst.amount,
-      dueDate: inst.dueDate,
-      label: `Parcela ${inst.month}`,
-      project: 'Acampamento'
-    })),
-    ...brilhoClients.filter(client => !client.isPaid).map(client => ({
-      id: client.id,
-      name: client.name,
-      amount: client.packagePrice,
-      dueDate: new Date(client.timestamp).toISOString().split('T')[0], // Use timestamp as reference if no date
-      label: `Pacote: ${client.packageName}`,
-      project: 'Brilho'
-    }))
-  ].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-
-  const filteredPendingCollections = selectedProject === 'Todos' 
-    ? pendingCollections 
-    : pendingCollections.filter(p => (selectedProject === 'Acampamento' && p.project === 'Acampamento') || (selectedProject === 'Brilho' && p.project === 'Brilho'));
-
-  const summary = [
-    { label: 'Total Arrecadado', value: totalRevenue, icon: DollarSign, color: 'bg-green-100 text-green-600' },
-    { label: 'Despesas Totais', value: totalExpense, icon: TrendingUp, color: 'bg-red-100 text-red-600' },
-    { label: 'Saldo Atual', value: totalBalance, icon: DollarSign, color: 'bg-blue-100 text-blue-600' },
-    { label: 'Ações Realizadas', value: totalCount, icon: CalendarIcon, color: 'bg-purple-100 text-purple-600' },
-  ];
+  const pendingCollections = installments.filter(inst => {
+    if (inst.isPaid) return false;
+    const dueDate = new Date(inst.dueDate);
+    return dueDate <= nextWeek;
+  }).map(inst => ({
+    id: inst.id,
+    name: inst.participantName,
+    amount: inst.amount,
+    dueDate: inst.dueDate,
+    label: `Parcela ${inst.month}`,
+    project: 'Acampamento'
+  })).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   return (
-    <div className="space-y-6 pb-20 md:pt-20">
-      <header className="px-4 py-6">
-        <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
-          <Home className="text-blue-500" />
-          Home
-        </h1>
-        <p className="text-sm font-medium text-slate-400">Visão Geral e Metas</p>
+    <div className="space-y-4 sm:space-y-6 pb-24 md:pt-10 max-w-7xl mx-auto overflow-hidden px-1 sm:px-0">
+      {/* Header */}
+      <header className="px-4 sm:px-6 py-4 sm:py-8 flex flex-col md:flex-row justify-between items-center md:items-center gap-6">
+        <div className="w-full text-center md:text-left">
+          <div className="flex items-center justify-center md:justify-start gap-3 mb-1">
+            <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
+              <TrendingUp className="text-white" size={24} />
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-normal uppercase">Intelligence</h1>
+          </div>
+          <p className="text-[10px] sm:text-sm font-bold text-slate-400 ml-1 uppercase tracking-widest">Painel Analítico</p>
+        </div>
+        
+        <div className="flex items-center justify-between w-full md:w-auto gap-4 bg-slate-900/50 p-4 rounded-3xl border border-slate-800 backdrop-blur-md">
+          <div className="flex flex-col items-center md:items-start flex-1 md:flex-none px-4">
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Acampa 28</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-1.5">Faltam</p>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-3xl sm:text-4xl font-black text-blue-500 tracking-tight leading-none">{daysRemaining}</span>
+              <span className="text-[10px] font-bold text-slate-300 uppercase">Dias</span>
+            </div>
+          </div>
+        </div>
       </header>
 
-      {/* Filtering */}
-      <div className="px-4 pb-2">
-        <div className="relative max-w-xs">
-          <select
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-            className="w-full appearance-none bg-slate-900 border border-slate-800 text-slate-200 text-sm font-bold rounded-xl px-4 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
-          >
-            {['Todos', 'Acampamento', 'Sabor', 'Brilho', 'Conecta', 'Brasa', 'Bênção'].map(cat => (
-              <option key={cat} value={cat}>
-                {cat === 'Todos' ? '📊 Visão Geral' : `📌 Projeto: ${cat}`}
-              </option>
-            ))}
-          </select>
-          <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-500">
-            <Filter size={14} />
+      {/* New Stats Bento Section */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 px-4 sm:px-6 mb-8">
+        <div className="md:col-span-3 bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-800 shadow-xl flex flex-row md:flex-col items-center md:items-start justify-between min-h-[100px] md:min-h-0">
+          <div className="flex flex-col md:items-start">
+            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] block leading-normal mb-1">Acampers</span>
+            <p className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-tight">{analytics.totalInscritos}</p>
+          </div>
+          <div className="flex flex-col items-end md:items-start md:mt-4">
+            <Users size={20} className="text-indigo-400/50 mb-1" />
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest leading-tight">Base de Dados Total</p>
+          </div>
+        </div>
+
+        <div className="md:col-span-6 bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-800 shadow-xl overflow-hidden">
+           <div className="flex items-center justify-between mb-4">
+             <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Financeiro</span>
+             <Target className="text-blue-400" size={14} />
+           </div>
+           <div className="grid grid-cols-3 gap-2 sm:gap-3">
+             <div className="bg-black/30 p-3 sm:p-4 rounded-2xl border border-slate-800/50 text-center">
+               <p className="text-xl sm:text-2xl font-black text-fuchsia-500">{analytics.breakdown.inteira}</p>
+               <p className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase mt-1">Inteiras</p>
+             </div>
+             <div className="bg-black/30 p-3 sm:p-4 rounded-2xl border border-slate-800/50 text-center">
+               <p className="text-xl sm:text-2xl font-black text-sky-500">{analytics.breakdown.meia}</p>
+               <p className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase mt-1">Meias</p>
+             </div>
+             <div className="bg-black/30 p-3 sm:p-4 rounded-2xl border border-slate-800/50 text-center">
+               <p className="text-xl sm:text-2xl font-black text-emerald-500">{analytics.breakdown.isento}</p>
+               <p className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase mt-1">Isentos</p>
+             </div>
+           </div>
+        </div>
+
+        <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-1 gap-4 sm:gap-6">
+          <div className="bg-emerald-950/20 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-emerald-900/30 flex items-center justify-between">
+            <div className="overflow-hidden">
+              <p className="text-[9px] sm:text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1 truncate">Pagos</p>
+              <p className="text-2xl sm:text-3xl font-black text-white leading-none">{analytics.paidCount}</p>
+            </div>
+            <CheckCircle2 size={18} className="text-emerald-500 shrink-0 ml-2" />
+          </div>
+          <div className="bg-rose-950/20 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-rose-900/30 flex items-center justify-between">
+            <div className="overflow-hidden">
+              <p className="text-[9px] sm:text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1 truncate">Atrasos</p>
+              <p className="text-2xl sm:text-3xl font-black text-white leading-none">{analytics.overdueCount}</p>
+            </div>
+            <AlertCircle size={18} className="text-rose-500 shrink-0 ml-2" />
           </div>
         </div>
       </div>
 
-      {/* Collection Reminders */}
-      {filteredPendingCollections.length > 0 && (
-        <div className="px-4">
-          <div className="bg-amber-950/20 border border-amber-900/30 rounded-3xl p-5 shadow-inner">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500">
-                <Bell size={20} className="animate-bounce" />
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 px-4 sm:px-6">
+        
+        {/* Collection Progress */}
+        <div className="lg:col-span-2 bg-slate-900 rounded-3xl sm:rounded-[32px] p-5 sm:p-8 border border-slate-800 shadow-xl relative overflow-hidden flex flex-col justify-between min-h-[250px] sm:min-h-[300px]">
+          <div className="relative z-10 h-full flex flex-col">
+            <div className="flex justify-between items-start mb-4 sm:mb-6">
               <div>
-                <h3 className="text-sm font-black text-amber-500 uppercase tracking-widest">Cobranças Ativas</h3>
-                <p className="text-[10px] text-slate-500 font-bold">Vencimentos Próximos ou Atrasados</p>
+                <h3 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight flex items-center gap-2">
+                  <Target className="text-emerald-400" size={20} />
+                  Financeiro
+                </h3>
+                <p className="text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Progresso de Arrecadação</p>
+              </div>
+              <div className="bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded-xl font-black text-xs border border-emerald-500/10">
+                {analytics.collectionProgress.toFixed(1)}%
               </div>
             </div>
-            
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
-              {filteredPendingCollections.map((inst) => {
-                const isOverdue = new Date(inst.dueDate) < today;
-                return (
-                  <motion.div 
-                    layout
-                    key={inst.id}
-                    className={cn(
-                      "flex justify-between items-center p-3 rounded-xl border bg-slate-900/50",
-                      isOverdue ? "border-red-900/30" : "border-amber-900/30"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "w-2 h-8 rounded-full",
-                        isOverdue ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" : "bg-blue-500"
-                      )}></div>
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="text-xs font-bold text-slate-100 leading-none">{inst.name}</p>
-                          <span className={cn(
-                            "text-[8px] px-1 rounded-sm font-bold uppercase",
-                            inst.project === 'Brilho' ? "bg-cyan-500/20 text-cyan-400" : "bg-indigo-500/20 text-indigo-400"
-                          )}>
-                            {inst.project}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Clock size={10} className="text-slate-500" />
-                          <p className={cn(
-                            "text-[10px] font-bold uppercase",
-                            isOverdue ? "text-red-400" : "text-blue-500"
-                          )}>
-                            {inst.project === 'Brilho' ? 'Cadastrado em ' : 'Vence '} {formatDate(inst.dueDate)} {isOverdue && inst.project !== 'Brilho' && '(Atrasado)'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs font-black text-slate-200">{formatCurrency(inst.amount)}</p>
-                      <p className="text-[8px] text-slate-500 font-bold uppercase">{inst.label}</p>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 px-4">
-        {summary.map((item, idx) => {
-          const Icon = item.icon;
-          return (
-            <div key={idx} className="bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-800 flex flex-col justify-between min-h-[90px]">
-              <div>
-                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center mb-2", item.color)}>
-                  <Icon size={16} />
+            <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-8 flex-1">
+              <div className="relative w-28 h-28 sm:w-40 sm:h-40 shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { value: analytics.totalCollected },
+                        { value: Math.max(0, analytics.totalExpected - analytics.totalCollected) }
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={55}
+                      startAngle={90}
+                      endAngle={450}
+                      paddingAngle={0}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      <Cell fill="#10B981" />
+                      <Cell fill="#1E293B" />
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-[9px] font-black text-slate-500 uppercase">Meta</span>
+                  <span className="text-base sm:text-lg font-black text-white">{formatCurrency(analytics.totalExpected)}</span>
                 </div>
-                <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black leading-tight mb-1">{item.label}</p>
               </div>
-              <p className="text-sm sm:text-lg font-black text-slate-100 truncate">
-                {typeof item.value === 'number' && (item.label.includes('Total') || item.label.includes('Saldo') || item.label.includes('Despesas'))
-                  ? formatCurrency(item.value) 
-                  : item.value}
-              </p>
-            </div>
-          );
-        })}
-      </div>
 
-      {/* Goals Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
-        {/* Meta Roof */}
-        <div className="bg-gradient-to-br from-indigo-950 to-slate-900 border border-indigo-900/40 rounded-3xl p-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 -mr-8 -mt-8 opacity-10">
-            <Target size={120} />
-          </div>
-          <div className="flex items-center gap-3 mb-6 relative z-10">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 flex items-center justify-center text-indigo-400 border border-indigo-500/20">
-              <Target size={24} />
-            </div>
-            <div>
-              <h3 className="text-xl font-bold text-slate-100 font-sans tracking-tight">Meta Roof</h3>
-              <p className="text-sm font-semibold text-indigo-400">Objetivo Inicial</p>
-            </div>
-          </div>
-          
-          <div className="space-y-4 relative z-10">
-            <div>
-              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end mb-2 gap-1 sm:gap-0">
-                <span className="text-3xl sm:text-4xl font-black text-white tracking-tighter shadow-sm leading-none">{formatCurrency(globalTotalRevenue)}</span>
-                <span className="text-xs sm:text-sm font-medium text-slate-400">de {formatCurrency(META_ROOF)}</span>
-              </div>
-              
-              <div className="h-4 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700/50 p-0.5 mt-2">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${roofProgress}%` }}
-                  transition={{ duration: 1.5, ease: "easeOut" }}
-                  className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full shadow-[0_0_15px_rgba(99,102,241,0.5)] relative overflow-hidden"
-                >
-                  <div className="absolute inset-0 bg-white/20" style={{ backgroundImage: 'linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent)', backgroundSize: '1rem 1rem' }}></div>
-                </motion.div>
-              </div>
-              
-              <div className="flex justify-between items-center mt-3">
-                <span className="text-[10px] sm:text-sm font-bold text-indigo-300">{roofProgress.toFixed(1)}% Alcançado</span>
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 text-right">Falta {formatCurrency(leftForRoof)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Meta Moon */}
-        <div className="bg-gradient-to-br from-fuchsia-950 to-slate-900 border border-fuchsia-900/40 rounded-3xl p-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 -mr-8 -mt-8 opacity-10">
-            <Rocket size={120} />
-          </div>
-          <div className="flex items-center gap-3 mb-6 relative z-10">
-            <div className="w-12 h-12 rounded-2xl bg-fuchsia-500/20 flex items-center justify-center text-fuchsia-400 border border-fuchsia-500/20">
-              <Rocket size={24} />
-            </div>
-            <div>
-              <h3 className="text-xl font-bold text-slate-100 font-sans tracking-tight">Meta Moon</h3>
-              <p className="text-sm font-semibold text-fuchsia-400">Superação de Expectativas</p>
-            </div>
-          </div>
-          
-          <div className="space-y-4 relative z-10">
-            <div>
-              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end mb-2 gap-1 sm:gap-0">
-                <span className="text-3xl sm:text-4xl font-black text-white tracking-tighter shadow-sm leading-none">{formatCurrency(globalTotalRevenue)}</span>
-                <span className="text-xs sm:text-sm font-medium text-slate-400">de {formatCurrency(META_MOON)}</span>
-              </div>
-              
-              <div className="h-4 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700/50 p-0.5 mt-2">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${moonProgress}%` }}
-                  transition={{ duration: 1.5, ease: "easeOut", delay: 0.2 }}
-                  className="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-400 rounded-full shadow-[0_0_15px_rgba(217,70,239,0.5)] relative overflow-hidden"
-                >
-                  <div className="absolute inset-0 bg-white/20" style={{ backgroundImage: 'linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent)', backgroundSize: '1rem 1rem' }}></div>
-                </motion.div>
-              </div>
-              
-              <div className="flex justify-between items-center mt-3">
-                <span className="text-[10px] sm:text-sm font-bold text-fuchsia-300">{moonProgress.toFixed(1)}% Alcançado</span>
-                <span className="text-[10px] sm:text-xs font-semibold text-slate-400 text-right">Falta {formatCurrency(leftForMoon)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      {/* Project Revenue Breakdown Pie Chart */}
-      {selectedProject === 'Todos' && (
-        <div className="px-4">
-          <div className="bg-slate-900 p-4 md:p-6 rounded-2xl shadow-sm border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="w-full text-center md:text-left">
-              <h2 className="text-base md:text-lg font-bold text-slate-100 mb-1 md:mb-2 font-sans">Distribuição da Arrecadação</h2>
-              <p className="text-[10px] md:text-xs text-slate-400">Contribuição de cada projeto para o objetivo geral.</p>
-            </div>
-            
-            <div className="h-[200px] md:h-[250px] w-full max-w-[250px] md:max-w-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={globalProjectTotals.filter(p => p.value > 0)}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={70}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {globalProjectTotals.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #1e293b' }}
-                    itemStyle={{ color: '#f1f5f9' }}
-                    formatter={(value: number) => formatCurrency(value)}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            
-            <div className="w-full md:w-auto grid grid-cols-2 md:grid-cols-1 gap-3 md:gap-2 mt-2 md:mt-0 px-2 md:px-0">
-              {globalProjectTotals.filter(p => p.value > 0).map((proj, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: proj.color }}></div>
-                  <span className="text-[11px] md:text-xs font-semibold text-slate-300 min-w-[70px] md:min-w-[80px]">{proj.name}</span>
-                  <span className="text-[10px] md:text-xs text-slate-500 font-mono">
-                    {((proj.value / globalTotalRevenue) * 100).toFixed(1)}%
-                  </span>
+              <div className="flex-1 space-y-3 w-full">
+                <div className="bg-black/40 p-4 rounded-2xl border border-slate-800/50">
+                  <p className="text-[9px] font-black text-slate-500 uppercase mb-1">Arrecadado</p>
+                  <p className="text-xl sm:text-2xl font-black text-white leading-tight">{formatCurrency(analytics.totalCollected)}</p>
                 </div>
-              ))}
+                <div className="bg-black/40 p-4 rounded-2xl border border-slate-800/50">
+                  <p className="text-[9px] font-black text-slate-500 uppercase mb-1">Restante</p>
+                  <p className="text-xl sm:text-2xl font-black text-slate-300 leading-tight">{formatCurrency(analytics.totalExpected - analytics.totalCollected)}</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Main Chart: Revenue vs Expense */}
-      <div className="px-4">
-        <div className="bg-slate-900 p-4 md:p-6 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
-          <h2 className="text-base md:text-lg font-bold text-slate-100 mb-4 md:mb-6 font-sans">Receitas vs Despesas</h2>
-          <div className="h-56 md:h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={projectTotals} margin={{ left: -30, right: 0, top: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#64748b', fontSize: 10 }}
-                  interval={0}
-                />
-                <YAxis 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#64748b', fontSize: 10 }}
-                  tickFormatter={(value) => `R$${(value/1000).toFixed(0)}k`}
-                />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #1e293b', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.3)' }}
-                  itemStyle={{ color: '#f1f5f9' }}
-                  formatter={(value: number) => [formatCurrency(value), '']}
-                />
-                <Legend iconType="circle" wrapperStyle={{ paddingTop: '15px', fontSize: '10px' }} />
-                <Bar name="Receitas" dataKey="value" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar name="Despesas" dataKey="expense" fill="#f43f5e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+        {/* Monthly Flow Chart */}
+        <div className="lg:col-span-2 bg-slate-900 rounded-3xl sm:rounded-[32px] p-5 sm:p-8 border border-slate-800 shadow-xl flex flex-col">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+            <div>
+              <h3 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight flex items-center gap-2">
+                <BarChart3 className="text-indigo-400" size={20} />
+                Fluxo de Caixa
+              </h3>
+              <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Expectativa Mensal</p>
+            </div>
+            <div className="flex gap-4">
+               <div className="flex items-center gap-2">
+                 <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-indigo-500"></div>
+                 <span className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-tighter">Projetado</span>
+               </div>
+               <div className="flex items-center gap-2">
+                 <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-emerald-500"></div>
+                 <span className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-tighter">Recebido</span>
+               </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* Revenue Over Time & Goal Track */}
-      <div className="px-4">
-        <div className="bg-slate-900 p-4 md:p-6 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
-          <h2 className="text-base md:text-lg font-bold text-slate-100 mb-2">Acompanhamento da Meta</h2>
-          <p className="text-xs text-slate-400 mb-4 md:mb-6">Progresso acumulado vs. Meta esperada para atingir o objetivo.</p>
-          <div className="h-64 md:h-80 w-full">
+          <div className="flex-1 min-h-[250px] sm:min-h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData} margin={{ left: -30, right: 0, top: 20, bottom: 0 }}>
+              <AreaChart data={analytics.flowChartData} margin={{ left: -10, right: 10, top: 0, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="colorAcumulado" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                  <linearGradient id="colorExpected" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366F1" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#6366F1" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorCollected" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1E293B" />
                 <XAxis 
                   dataKey="month" 
                   axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#64748b', fontSize: 10 }} 
+                  tickLine={false}
+                  minTickGap={10}
+                  tick={{ fill: '#64748B', fontSize: 9, fontWeight: 700 }}
+                  tickFormatter={(val) => {
+                    const [y, m] = val.split('-');
+                    const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+                    return months[parseInt(m) - 1];
+                  }}
                 />
                 <YAxis 
-                  yAxisId="left"
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#64748b', fontSize: 9 }}
-                  tickFormatter={(value) => `R$${(value / 1000).toFixed(0)}k`}
-                />
-                <YAxis 
-                  yAxisId="right"
-                  orientation="right"
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#64748b', fontSize: 9 }}
-                  tickFormatter={(value) => `R$${(value / 1000).toFixed(0)}k`}
+                  tick={{ fill: '#64748B', fontSize: 9, fontWeight: 700 }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={40}
+                  tickFormatter={(val) => `R$${val/1000}k`}
                 />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #1e293b', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.3)' }}
-                  itemStyle={{ color: '#f1f5f9' }}
-                  formatter={(value: number, name: string) => [formatCurrency(value), name]}
+                  contentStyle={{ backgroundColor: '#020617', border: '1px solid #1E293B', borderRadius: '16px', padding: '10px' }}
+                  itemStyle={{ fontWeight: 800, fontSize: '11px' }}
+                  labelStyle={{ color: '#94A3B8', fontSize: '9px', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 900 }}
                 />
-                <Legend iconType="circle" wrapperStyle={{ paddingTop: '15px', fontSize: '10px' }} />
-                
-                {/* Collected that specific month */}
-                <Bar yAxisId="right" name="Arrecadado no Mês" dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} opacity={0.6} />
-                
-                {/* Meta planejado */}
-                <Line yAxisId="left" name="Meta Esperada Acum." type="monotone" dataKey="MetaEsperada" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                
-                {/* O que realmente arrecadou acumulado */}
-                <Area yAxisId="left" name="Arrecadado Acumulado" type="monotone" dataKey="Acumulado" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorAcumulado)" />
-                
-              </ComposedChart>
+                <Area type="monotone" dataKey="expected" stroke="#6366F1" strokeWidth={2} fillOpacity={1} fill="url(#colorExpected)" name="Projetado" />
+                <Area type="monotone" dataKey="collected" stroke="#10B981" strokeWidth={2} fillOpacity={1} fill="url(#colorCollected)" name="Recebido" />
+              </AreaChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Pending Collections Week */}
+        <div className="lg:col-span-4 bg-slate-900 rounded-[32px] p-8 border border-slate-800 shadow-xl overflow-hidden">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-2">
+              <Bell className="text-amber-400" />
+              Pendências da Semana
+            </h3>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{pendingCollections.length} Previstos</span>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            {pendingCollections.length === 0 ? (
+              <div className="bg-black/30 p-8 rounded-3xl border border-dashed border-slate-800 text-center">
+                <CheckCircle2 className="mx-auto text-emerald-500 mb-2 opacity-20" size={32} />
+                <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Tudo em ordem para os próximos 7 dias</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {pendingCollections.slice(0, 4).map(pending => (
+                  <div key={pending.id} className="bg-black/30 p-5 rounded-3xl border border-slate-800 hover:border-slate-700 transition-all group">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="w-10 h-10 rounded-2xl bg-slate-800 flex items-center justify-center text-slate-400 group-hover:bg-amber-500/10 group-hover:text-amber-500 transition-all">
+                        <DollarSign size={20} />
+                      </div>
+                      <span className="text-[9px] font-black text-amber-500 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/10">
+                        Vence {formatDate(pending.dueDate)}
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-black text-white mb-1 truncate">{pending.name}</h4>
+                    <p className="text-lg font-black text-amber-500">{formatCurrency(pending.amount)}</p>
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">{pending.label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {pendingCollections.length > 4 && (
+              <p className="text-center text-[10px] font-bold text-slate-600 uppercase tracking-widest">+ {pendingCollections.length - 4} outras pendências para esta semana</p>
+            )}
+          </div>
+        </div>
+
+        {/* Logistics Operations */}
+        <div className="lg:col-span-4 bg-slate-900 rounded-[40px] p-6 sm:p-8 border border-slate-800 shadow-xl">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 md:gap-8 mb-8 md:mb-10">
+            <div>
+              <h3 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
+                <Rocket className="text-indigo-400" size={28} />
+                Gestão Logística
+              </h3>
+              <p className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mt-1">Monitoramento de Capacidade</p>
+            </div>
+            
+            <div className="flex gap-4 w-full md:w-auto">
+              <div className="flex-1 md:flex-none bg-slate-800/40 px-6 py-4 rounded-3xl border border-slate-700/50 flex flex-col items-center">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Veículos</p>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-black text-white">{analytics.breakdown.numCarros}</span>
+                  <span className="text-[10px] font-bold text-slate-500">Un</span>
+                </div>
+              </div>
+              <div className="flex-1 md:flex-none bg-slate-800/40 px-6 py-4 rounded-3xl border border-slate-700/50 flex flex-col items-center">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Passageiros</p>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-black text-white">{analytics.breakdown.onibus + analytics.breakdown.carro}</span>
+                  <span className="text-[10px] font-bold text-slate-500">Total</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+            <div className="lg:col-span-8 bg-black/40 rounded-3xl p-8 border border-slate-800/50">
+              <div className="flex justify-between items-center mb-8">
+                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Frota de Ônibus</span>
+                <span className="text-xs font-black text-white bg-indigo-500/20 px-4 py-1.5 rounded-full">{busOccupancyRate.toFixed(1)}% Taxa de Uso</span>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-10 items-center">
+                 <div className="flex-1 w-full space-y-6">
+                    <div className="h-6 w-full bg-slate-800/50 rounded-full overflow-hidden p-1.5 border border-slate-700/30 shadow-inner">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.min(busOccupancyRate, 100)}%` }}
+                        transition={{ duration: 1.5, ease: "easeOut" }}
+                        className="h-full bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-400 rounded-full"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-6">
+                       <div>
+                          <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Escalados</p>
+                          <p className="text-3xl font-black text-white">{busesNeeded} <span className="text-xs font-bold text-slate-600">Bus</span></p>
+                       </div>
+                       <div>
+                          <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Vagas Livres</p>
+                          <p className="text-3xl font-black text-indigo-400">{Math.max(0, (busesNeeded * BUS_CAPACITY) - analytics.breakdown.onibus)} <span className="text-xs font-bold text-slate-600">Sits</span></p>
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="shrink-0 w-32 h-32 flex items-center justify-center relative">
+                    <div className="absolute inset-0 rounded-full border-8 border-slate-800/50"></div>
+                    <div className="text-center">
+                       <p className="text-2xl font-black text-white leading-none">{analytics.breakdown.onibus}</p>
+                       <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Assentos</p>
+                    </div>
+                 </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-4 bg-emerald-950/10 rounded-3xl p-8 border border-emerald-900/20 flex flex-col items-center justify-center text-center">
+              <div className="w-20 h-20 rounded-[32px] bg-emerald-500/10 flex items-center justify-center text-emerald-400 mb-6 border border-emerald-500/10 shadow-lg shadow-emerald-900/10">
+                <Car size={40} />
+              </div>
+              <p className="text-5xl font-black text-white mb-2">{analytics.breakdown.numCarros}</p>
+              <p className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.2em]">Carros Próprios</p>
+              <p className="text-xs font-bold text-slate-400 mt-4 uppercase">Total de <span className="text-emerald-400">{analytics.breakdown.carro} passageiros</span> via terrestre privada.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -502,3 +504,4 @@ const Dashboard: React.FC = () => {
 };
 
 export default Dashboard;
+

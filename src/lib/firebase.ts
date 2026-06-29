@@ -4,7 +4,16 @@
  */
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult, 
+  signOut,
+  setPersistence,
+  browserLocalPersistence
+} from 'firebase/auth';
 import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -12,8 +21,16 @@ const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 }, (firebaseConfig as any).firestoreDatabaseId);
+
 export const auth = getAuth(app);
+
+// Forçar persistência local para manter a sessão no celular
+setPersistence(auth, browserLocalPersistence).catch(err => {
+  console.error("Erro ao definir persistência:", err);
+});
+
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',
@@ -63,33 +80,29 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 // Global sign in helper
 export const login = async () => {
   try {
-    // Detect mobile
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
-    if (isMobile) {
-      await signInWithRedirect(auth, googleProvider);
-      return null; // Redirect will happen, component will re-mount
-    }
-
+    // Em dispositivos móveis, navegadores como Safari bloqueiam popups agressivamente.
+    // No entanto, em iframes (AI Studio), o pop-up é mais confiável se disparado por clique.
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error: any) {
-    console.error("Login failed", error);
+    console.error("Tentativa de login falhou", error);
     
-    if (error.code === 'auth/popup-blocked' || error.code === 'auth/cancelled-popup-request') {
+    // Se o popup foi bloqueado, tentamos o redirecionamento
+    if (error.code === 'auth/popup-blocked' || error.code === 'auth/internal-error') {
       try {
-        console.log("Popup blocked or multiple requests, trying redirect...");
+        console.log("Tentando login por redirecionamento...");
         await signInWithRedirect(auth, googleProvider);
-      } catch (redirectError) {
-        console.error("Redirect login failed", redirectError);
-        alert("O login falhou. Por favor, certifique-se de que popups estão permitidos ou tente novamente.");
+      } catch (redirectError: any) {
+        console.error("Erro no redirecionamento", redirectError);
+        throw redirectError;
       }
-    } else if (error.code === 'auth/popup-closed-by-user') {
-      // User closed the popup
-    } else {
-      alert("Erro ao entrar com Google: " + error.message);
     }
-    return null;
+    
+    if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+      return null;
+    }
+    
+    throw error;
   }
 };
 
@@ -98,9 +111,14 @@ export const logout = () => signOut(auth);
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+    console.log("Firestore connection test: OK");
+  } catch (error: any) {
+    if (error.code === 'unavailable') {
+      console.error("Firestore is currently unavailable. This might be a transient network issue in the preview environment. The client will retry automatically.");
+    } else if (error.code === 'permission-denied') {
+      console.warn("Firestore connection test: Permission denied (expected if rules are active).");
+    } else {
+      console.error("Firestore connection test failed:", error.message);
     }
   }
 }
