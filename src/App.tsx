@@ -86,7 +86,7 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-black font-sans text-slate-100 overflow-x-hidden">
       {/* Header */}
-      <div className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 h-[72px] px-5 sticky top-0 z-40 flex items-center justify-between shadow-sm">
+      <div className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 h-[72px] px-5 relative z-40 flex items-center justify-between shadow-sm">
         <h1 className="font-display font-black text-blue-500 tracking-tighter text-lg uppercase">Central 28</h1>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-slate-800/50 border border-slate-700/50">
@@ -105,7 +105,9 @@ function AppContent() {
         </div>
       </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-28 md:pb-8 pt-20 md:pt-40">
+      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -118,8 +120,6 @@ function AppContent() {
           </motion.div>
         </AnimatePresence>
       </main>
-
-      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
     </div>
   );
 }

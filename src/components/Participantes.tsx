@@ -891,7 +891,7 @@ const Participantes: React.FC = () => {
       </header>
 
       {/* Intelligence Search & Filters */}
-      <div className="sticky top-[72px] md:top-0 z-30 py-3 bg-black md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0">
+      <div className="py-3 bg-black md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0">
         <div className="relative group w-full lg:max-w-2xl">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <Search className="text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
