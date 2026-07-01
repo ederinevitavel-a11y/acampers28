@@ -166,7 +166,7 @@ const Participantes: React.FC = () => {
       ...prev,
       dependents: [
         ...prev.dependents,
-        { id: Math.random().toString(36).substring(7), name: '', birthDate: '', relationship: 'Cônjuge', ageAtCamp: 0, paymentType: 'Inteira' }
+        { id: Math.random().toString(36).substring(7), name: '', rg: '', birthDate: '', relationship: 'Cônjuge', ageAtCamp: 0, paymentType: 'Inteira' }
       ]
     }));
   };
@@ -1119,6 +1119,26 @@ const Participantes: React.FC = () => {
                                      <option value="Pais">Pai / Mãe</option>
                                      <option value="Outro">Outro</option>
                                    </select>
+                                 </div>
+                                 <div className="space-y-1">
+                                   <div className="flex justify-between items-center ml-1">
+                                     <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                                       RG ou RN (Reg. Nacional)
+                                     </span>
+                                     {formData.transport === 'Ônibus' && (
+                                       <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest animate-pulse">
+                                         * Obrigatório para Ônibus
+                                       </span>
+                                     )}
+                                   </div>
+                                   <input 
+                                     type="text" 
+                                     placeholder={formData.transport === 'Ônibus' ? "RG ou RN (Obrigatório)" : "RG ou Registro Nacional"}
+                                     value={dep.rg || ''}
+                                     onChange={e => updateDependent(dep.id, 'rg', maskRG(e.target.value))}
+                                     required={formData.transport === 'Ônibus'}
+                                     className="w-full bg-slate-900/50 border border-slate-800 text-white p-2.5 sm:p-3 rounded-lg sm:rounded-xl outline-none font-bold text-xs placeholder:text-slate-600"
+                                   />
                                  </div>
                                </div>
                              </div>
