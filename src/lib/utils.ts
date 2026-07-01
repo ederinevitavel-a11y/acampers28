@@ -32,6 +32,11 @@ export function maskPhone(value: string) {
 }
 
 export function maskRG(value: string) {
+  // Se contiver qualquer letra, permite digitação alfanumérica de RN ou outro documento
+  if (/[a-zA-Z]/.test(value)) {
+    return value.replace(/[^a-zA-Z0-9.\-\s]/g, '').substring(0, 20).toUpperCase();
+  }
+  
   const cleanValue = value.replace(/\D/g, '');
   return cleanValue
     .replace(/(\d{2})(\d)/, '$1.$2')

@@ -444,7 +444,7 @@ const Participantes: React.FC = () => {
     doc.text('Dados do Acamper:', 14, 65);
     doc.setFont('helvetica', 'normal');
     doc.text(`Nome: ${p.name}`, 14, 72);
-    doc.text(`RG: ${p.rg || 'Não informado'}`, 14, 79);
+    doc.text(`RG / RN: ${p.rg || 'Não informado'}`, 14, 79);
     doc.text(`Telefone: ${p.phone || 'Não informado'}`, 14, 86);
     
     // Summary
@@ -663,7 +663,7 @@ const Participantes: React.FC = () => {
       data.push({
         'Tipo': 'Titular',
         'Nome': p.name,
-        'RG': p.rg,
+        'RG / RN': p.rg,
         'Parentesco': '-',
         'Nascimento': formatDate(p.birthDate),
         'Idade (2028)': p.ageAtCamp,
@@ -681,7 +681,7 @@ const Participantes: React.FC = () => {
           data.push({
             'Tipo': 'Dependente',
             'Nome': dep.name,
-            'RG': dep.rg || '',
+            'RG / RN': dep.rg || '',
             'Parentesco': dep.relationship,
             'Nascimento': formatDate(dep.birthDate),
             'Idade (2028)': dep.ageAtCamp,
@@ -748,7 +748,7 @@ const Participantes: React.FC = () => {
     });
 
     autoTable(doc, {
-      head: [['Tipo', 'Nome', 'RG', 'Nascimento', 'Idade', 'Categoria', 'Transporte', 'Status']],
+      head: [['Tipo', 'Nome', 'RG / RN', 'Nascimento', 'Idade', 'Categoria', 'Transporte', 'Status']],
       body: tableData,
       startY: 35,
       styles: { fontSize: 8 },
@@ -990,13 +990,13 @@ const Participantes: React.FC = () => {
 
                         <div className="grid grid-cols-2 gap-3 sm:gap-4">
                           <div className="space-y-1">
-                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">RG</label>
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">RG ou RN (Reg. Nacional)</label>
                             <input 
                               type="text" 
                               value={formData.rg}
                               onChange={e => setFormData({...formData, rg: maskRG(e.target.value)})}
                               className="w-full bg-slate-800 border border-slate-700 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl outline-none font-bold placeholder:text-slate-600 text-sm"
-                              placeholder="00.000.000-0"
+                              placeholder="RG ou Registro Nacional"
                             />
                           </div>
                           <div className="space-y-1">
