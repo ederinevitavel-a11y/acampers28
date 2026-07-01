@@ -31,8 +31,8 @@ const getMaxInstallments = () => {
   const targetYear = 2027;
   const targetMonth = 12;
   
-  // Total months available from NEXT month
-  const totalMonths = ((targetYear - currentYear) * 12) + (targetMonth - currentMonth);
+  // Total months available from CURRENT month
+  const totalMonths = ((targetYear - currentYear) * 12) + (targetMonth - currentMonth) + 1;
   return Math.max(1, totalMonths);
 };
 
@@ -249,7 +249,7 @@ const Participantes: React.FC = () => {
           if (totalValue > 0 && formData.installments > 0) {
             const installmentAmount = totalValue / formData.installments;
             let currentYear = new Date().getFullYear();
-            let currentMonth = new Date().getMonth() + 2; // Start next month
+            let currentMonth = new Date().getMonth() + 1; // Start current month (July onwards)
             
             for (let i = 0; i < formData.installments; i++) {
               if (currentMonth > 12) { currentMonth = 1; currentYear++; }
@@ -288,7 +288,7 @@ const Participantes: React.FC = () => {
           const installmentAmount = totalValue / formData.installments;
           
           let currentYear = new Date().getFullYear();
-          let currentMonth = new Date().getMonth() + 2; // Start next month
+          let currentMonth = new Date().getMonth() + 1; // Start current month (July onwards)
           
           for (let i = 0; i < formData.installments; i++) {
             if (currentMonth > 12) { currentMonth = 1; currentYear++; }
@@ -764,28 +764,38 @@ const Participantes: React.FC = () => {
     const pageHeight = doc.internal.pageSize.getHeight();
     
     if (logoBase64) {
-      doc.addImage(logoBase64, 'JPEG', 14, 5, 25, 25);
+      doc.addImage(logoBase64, 'JPEG', 14, 10, 25, 25);
     }
 
     // Header
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(30, 41, 59);
-    doc.text("CONTRATO DE CONDIÇÕES GERAIS – ACAMPA CENTRAL 2028", pageWidth / 2, 20, { align: 'center' });
+    
+    // Position title to the right of the logo to avoid overlap
+    doc.text("CONTRATO DE CONDIÇÕES GERAIS", 45, 20);
+    doc.text("ACAMPA CENTRAL 2028", 45, 27);
     
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
-    const headerInfo = [
-      "Organização: Igreja Batista Central – Itaim Paulista",
-      "Evento: Acampa Central 2028",
+    
+    doc.text("Organização: Igreja Batista Central – Itaim Paulista", 45, 35);
+    doc.text("Evento: Acampa Central 2028", 45, 41);
+
+    const extraInfo = [
       "Datas: 29 e 30 de janeiro de 2028",
       "Saída: 28 de janeiro de 2028, às 19h, da Igreja Batista Central – Itaim Paulista"
     ];
-    headerInfo.forEach((text, i) => doc.text(text, 20, 35 + (i * 7)));
+    
+    let currentY = 50;
+    extraInfo.forEach((text, i) => {
+      doc.text(text, 20, currentY);
+      currentY += 6;
+    });
 
     // Cláusulas
-    let y = 70;
+    let y = currentY + 10;
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(15, 23, 42);
