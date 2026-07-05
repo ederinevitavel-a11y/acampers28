@@ -145,6 +145,21 @@
         "timestamp": { "type": "number" }
       },
       "required": ["participantId", "participantName", "amount", "paidAmount", "month", "dueDate", "isPaid", "timestamp"]
+    },
+    "CampExpense": {
+      "title": "CampExpense",
+      "description": "Organization's accounts payable for camp rental/expenses",
+      "type": "object",
+      "properties": {
+        "installmentNumber": { "type": "number" },
+        "dueDate": { "type": "string" },
+        "amount": { "type": "number" },
+        "isPaid": { "type": "boolean" },
+        "paymentDate": { "type": "string" },
+        "observation": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["installmentNumber", "dueDate", "amount", "isPaid", "timestamp"]
     }
   },
   "firestore": {
@@ -183,6 +198,10 @@
     "/installments": {
       "schema": "Installment",
       "description": "Participant payment installments"
+    },
+    "/camp_expenses": {
+      "schema": "CampExpense",
+      "description": "Camp organization payment expenses (accounts payable)"
     }
   }
 }

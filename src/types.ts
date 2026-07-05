@@ -137,4 +137,15 @@ export interface Participant {
   timestamp: number;
 }
 
+export interface CampExpense {
+  id: string;
+  installmentNumber: number;
+  dueDate: string; // "YYYY-MM-DD"
+  amount: number;
+  isPaid: boolean;
+  paymentDate?: string;
+  observation?: string;
+  timestamp: number;
+}
+
 export type AppTab = 'dashboard' | 'participantes';

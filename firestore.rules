@@ -5,11 +5,9 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function isVerified() { 
       return isSignedIn() && (
-        request.auth.token.email_verified == true && (
-          request.auth.token.email == 'ederlcs@hotmail.com' ||
-          request.auth.token.email == 'elaine.rsn@hotmail.com' ||
-          request.auth.token.email == 'rafa-cnunes@hotmail.com'
-        )
+        request.auth.token.email == 'ederlcs@hotmail.com' ||
+        request.auth.token.email == 'elaine.rsn@hotmail.com' ||
+        request.auth.token.email == 'rafa-cnunes@hotmail.com'
       ); 
     }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
@@ -132,6 +130,17 @@ service cloud.firestore {
         && data.timestamp is number;
     }
 
+    // Validation for CampExpense (Organization payments)
+    function isValidCampExpense(data) {
+      return data.keys().hasAll(['installmentNumber', 'dueDate', 'amount', 'isPaid', 'timestamp'])
+        && data.keys().size() <= 10
+        && data.installmentNumber is number
+        && data.dueDate is string
+        && data.amount is number
+        && data.isPaid is bool
+        && data.timestamp is number;
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;
@@ -191,6 +200,12 @@ service cloud.firestore {
       allow list: if isVerified();
       allow get, delete: if isVerified() && isValidId(installmentId);
       allow create, update: if isVerified() && isValidInstallment(incoming());
+    }
+
+    match /camp_expenses/{expenseId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(expenseId);
+      allow create, update: if isVerified() && isValidCampExpense(incoming());
     }
   }
 }

@@ -6,7 +6,7 @@ import {
   Edit3, Users, FileSpreadsheet, FileText, FileSignature, FileStack,
   Phone, AlertCircle, Info, Filter,
   ArrowUpRight, Download, MoreHorizontal,
-  Target, Rocket, Car
+  Target, Rocket, Car, Clock, MessageSquare
 } from 'lucide-react';
 import { Participant, Installment, Dependent } from '../types';
 import { cn, formatDate, formatCurrency, maskPhone, maskRG } from '../lib/utils';
@@ -101,6 +101,39 @@ const Participantes: React.FC = () => {
     dependents: [] as Dependent[]
   });
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const overdueList = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return allParticipants
+      .filter(p => {
+        if (p.isPaid || p.totalValue === 0) return false;
+        return allInstallments.some(inst => 
+          inst.participantId === p.id && 
+          !inst.isPaid && 
+          new Date(inst.dueDate + 'T12:00:00') < today
+        );
+      })
+      .map(p => {
+        const pInstallments = allInstallments.filter(inst => inst.participantId === p.id && !inst.isPaid);
+        const overdueInsts = pInstallments.filter(inst => new Date(inst.dueDate + 'T12:00:00') < today);
+        const totalOverdue = overdueInsts.reduce((sum, inst) => sum + (inst.amount - (inst.paidAmount || 0)), 0);
+        
+        const sortedOverdue = [...overdueInsts].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+        const oldestOverdue = sortedOverdue[0];
+
+        return {
+          id: p.id,
+          name: p.name,
+          phone: p.phone,
+          totalOverdue,
+          dueDate: oldestOverdue ? oldestOverdue.dueDate : '',
+          month: oldestOverdue ? oldestOverdue.month : ''
+        };
+      })
+      .sort((a, b) => b.totalOverdue - a.totalOverdue);
+  }, [allParticipants, allInstallments]);
 
   const getParticipantOverdue = (participantId: string) => {
     const today = new Date();
@@ -1290,7 +1323,12 @@ const Participantes: React.FC = () => {
         </div>
       </div>
 
-        <div className="grid grid-cols-1 gap-4">
+      {/* Grid container to hold both List and Cobrança Rápida side by side on desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* Left Side: Participant List */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="grid grid-cols-1 gap-4">
           {filteredParticipants.length === 0 ? (
             <div className="bg-slate-900/50 p-20 rounded-[32px] border border-dashed border-slate-800 text-center">
               <User className="mx-auto text-slate-800 mb-4" size={48} />
@@ -1371,6 +1409,30 @@ const Participantes: React.FC = () => {
                         </div>
                         
                         <div className="flex items-center gap-1 sm:gap-2">
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              if (!p.phone) return;
+                              const cleanPhone = p.phone.replace(/\D/g, '');
+                              if (cleanPhone) {
+                                const finalPhone = cleanPhone.length <= 11 ? `55${cleanPhone}` : cleanPhone;
+                                const text = encodeURIComponent(`Olá ${p.name}! Tudo bem? Estamos entrando em contato sobre a sua inscrição no Acampa Central 2028.`);
+                                window.open(`https://wa.me/${finalPhone}?text=${text}`, '_blank');
+                              }
+                            }}
+                            className={cn(
+                              "p-2 sm:p-3 rounded-lg sm:rounded-2xl transition-all flex items-center justify-center",
+                              p.phone 
+                                ? "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300" 
+                                : "bg-slate-800 text-slate-600 cursor-not-allowed opacity-40"
+                            )}
+                            disabled={!p.phone}
+                            title={p.phone ? "Conversar no WhatsApp" : "Telefone não cadastrado"}
+                          >
+                            <svg className="w-3.5 h-3.5 sm:w-[18px] sm:h-[18px]" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.062 5.248 5.308 0 11.722 0c3.107.002 6.028 1.211 8.225 3.41s3.402 5.12 3.4 8.228c-.005 6.473-5.251 11.721-11.665 11.721-2.002-.001-3.97-.514-5.711-1.493L0 24zm6.59-14.859c-.12-.268-.247-.274-.361-.278-.093-.004-.201-.004-.308-.004s-.282.04-.429.198c-.148.158-.564.55-.564 1.34s.577 1.554.657 1.662c.081.108 1.135 1.733 2.75 2.43 1.343.58 1.616.465 1.905.438.289-.026.932-.38 1.066-.748.134-.368.134-.683.094-.748-.04-.065-.148-.105-.308-.185-.16-.081-.932-.46-1.077-.512-.145-.052-.25-.081-.355.081-.105.162-.408.512-.5.617-.093.105-.185.118-.345.038-.16-.081-.676-.249-1.288-.795-.476-.424-.797-.948-.891-1.11-.093-.162-.01-.25.071-.33.073-.072.162-.19.242-.285.08-.096.108-.16.162-.268.054-.105.027-.2-.013-.281-.04-.082-.361-.871-.495-1.197z"/>
+                            </svg>
+                          </button>
                           <button 
                             onClick={(e) => { e.stopPropagation(); handleEditParticipant(p); }}
                             className="p-2 sm:p-3 bg-slate-800 hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-400 rounded-lg sm:rounded-2xl transition-all"
@@ -1590,6 +1652,92 @@ const Participantes: React.FC = () => {
             })
           )}
         </div>
+        </div>
+
+        {/* Right Side: Cobrança Rápida (WhatsApp) */}
+        <div className="lg:col-span-1 space-y-4">
+          <div className="flex items-center justify-between px-2">
+            <h2 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2">
+              <MessageSquare size={18} className="text-emerald-400" />
+              Cobrança Rápida (WhatsApp)
+            </h2>
+          </div>
+
+          <div id="quick-billing-card" className="bg-slate-900 rounded-[32px] p-6 border border-slate-800 shadow-xl flex flex-col lg:sticky lg:top-6 min-h-[350px]">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                Atrasos Pendentes
+              </h3>
+              <span className="text-[9px] font-black text-rose-500 bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/10 uppercase tracking-widest animate-pulse">
+                {overdueList.length} em atraso
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto max-h-[500px] pr-1 scrollbar-thin scrollbar-thumb-slate-800 space-y-3">
+              {overdueList.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center py-12 px-4 bg-black/20 rounded-2xl border border-dashed border-slate-800 text-center">
+                  <CheckCircle2 className="text-emerald-500 mb-3 opacity-20" size={36} />
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">Tudo em Dia</h4>
+                  <p className="text-[10px] text-slate-500 font-medium max-w-[200px] mt-1">Nenhum camper possui pendência ou parcela vencida.</p>
+                </div>
+              ) : (
+                overdueList.map((item) => (
+                  <div 
+                    key={item.id} 
+                    className="bg-black/20 p-4 rounded-2xl border border-slate-800/80 hover:border-slate-700/80 flex items-center justify-between gap-4 transition-all duration-200 group"
+                  >
+                    <div className="overflow-hidden space-y-1 flex-1">
+                      <h4 className="text-xs sm:text-sm font-black text-white truncate">{item.name}</h4>
+                      <div className="flex flex-wrap items-center gap-y-1 gap-x-2">
+                        <div className="flex items-center gap-1">
+                          <Clock size={11} className="text-slate-500" />
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                            Venceu {item.dueDate ? formatDate(item.dueDate) : 'Parcela'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <p className="text-xs sm:text-sm font-black text-rose-400">{formatCurrency(item.totalOverdue)}</p>
+                        <p className="text-[8px] font-bold text-slate-600 uppercase tracking-widest">Atrasado</p>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (!item.phone) return;
+                          const cleanPhone = item.phone.replace(/\D/g, '');
+                          if (cleanPhone) {
+                            const finalPhone = cleanPhone.length <= 11 ? `55${cleanPhone}` : cleanPhone;
+                            const formattedDate = item.dueDate ? formatDate(item.dueDate) : '';
+                            const text = encodeURIComponent(
+                              `Olá ${item.name}! Tudo bem? Passando para lembrar da sua parcela do Acampa Central 2028, que venceu em ${formattedDate} no valor de ${formatCurrency(item.totalOverdue)}. Se você já efetuou o pagamento, favor desconsiderar esta mensagem. Obrigado! 🙏`
+                            );
+                            window.open(`https://wa.me/${finalPhone}?text=${text}`, '_blank');
+                          }
+                        }}
+                        disabled={!item.phone}
+                        className={cn(
+                          "p-2.5 rounded-xl transition-all flex items-center justify-center active:scale-90",
+                          item.phone 
+                            ? "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300" 
+                            : "bg-slate-800 text-slate-600 cursor-not-allowed opacity-40"
+                        )}
+                        title={item.phone ? "Enviar cobrança amigável via WhatsApp" : "Sem telefone cadastrado"}
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.062 5.248 5.308 0 11.722 0c3.107.002 6.028 1.211 8.225 3.41s3.402 5.12 3.4 8.228c-.005 6.473-5.251 11.721-11.665 11.721-2.002-.001-3.97-.514-5.711-1.493L0 24zm6.59-14.859c-.12-.268-.247-.274-.361-.278-.093-.004-.201-.004-.308-.004s-.282.04-.429.198c-.148.158-.564.55-.564 1.34s.577 1.554.657 1.662c.081.108 1.135 1.733 2.75 2.43 1.343.58 1.616.465 1.905.438.289-.026.932-.38 1.066-.748.134-.368.134-.683.094-.748-.04-.065-.148-.105-.308-.185-.16-.081-.676-.249-1.288-.795-.476-.424-.797-.948-.891-1.11-.093-.162-.01-.25.071-.33.073-.072.162-.19.242-.285.08-.096.108-.16.162-.268.054-.105.027-.2-.013-.281-.04-.082-.361-.871-.495-1.197z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
       
       {/* Modals */}
       <AnimatePresence>

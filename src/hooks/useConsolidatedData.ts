@@ -9,13 +9,14 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
   SaborCentralEntry, BrasaGracaEntry, BrilhoCelesteWash, 
   ConectaCentralEvent, RecebaSuabencaoRaffle, BrilhoCelesteClient, Participant, Installment,
-  BrilhoCelesteExpense
+  BrilhoCelesteExpense, CampExpense
 } from '../types';
 
 export function useConsolidatedData() {
   const [data, setData] = useState({
     participants: [] as Participant[],
     installments: [] as Installment[],
+    campExpenses: [] as CampExpense[],
     loading: true,
     error: null as string | null
   });
@@ -26,6 +27,7 @@ export function useConsolidatedData() {
     const collections = [
       { name: 'participants', key: 'participants' },
       { name: 'installments', key: 'installments' },
+      { name: 'camp_expenses', key: 'campExpenses' },
     ];
 
     let loadedCount = 0;
