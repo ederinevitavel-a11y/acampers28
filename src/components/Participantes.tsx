@@ -6,7 +6,7 @@ import {
   Edit3, Users, FileSpreadsheet, FileText, FileSignature, FileStack,
   Phone, AlertCircle, Info, Filter,
   ArrowUpRight, Download, MoreHorizontal,
-  Target, Rocket, Car, Clock, MessageSquare
+  Target, Rocket, Car, Clock, MessageSquare, QrCode
 } from 'lucide-react';
 import { Participant, Installment, Dependent } from '../types';
 import { cn, formatDate, formatCurrency, maskPhone, maskRG } from '../lib/utils';
@@ -19,6 +19,7 @@ import { ConfirmModal } from './ConfirmModal';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import QRCode from 'qrcode';
 
 const CAMP_DATE = new Date('2028-01-29T00:00:00'); // Novo Acampa 28 date
 
@@ -41,9 +42,11 @@ const Participantes: React.FC = () => {
   const [installmentsMap, setInstallmentsMap] = useState<Record<string, Installment[]>>({});
   const [showForm, setShowForm] = useState(false);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
+  const [showPixModal, setShowPixModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [logoBgColor, setLogoBgColor] = useState<[number, number, number]>([15, 23, 42]);
+  const [pixQrBase64, setPixQrBase64] = useState<string | null>(null);
 
   useEffect(() => {
     const img = new Image();
@@ -66,6 +69,20 @@ const Participantes: React.FC = () => {
       }
     };
     img.src = 'https://i.imgur.com/yqEPRBk.jpeg';
+
+    const qrImg = new Image();
+    qrImg.crossOrigin = 'anonymous';
+    qrImg.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = qrImg.width;
+      canvas.height = qrImg.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(qrImg, 0, 0);
+        setPixQrBase64(canvas.toDataURL('image/png'));
+      }
+    };
+    qrImg.src = 'https://i.imgur.com/C3ItOnH.png';
   }, []);
   const [paymentModal, setPaymentModal] = useState<{isOpen: boolean, participantId: string, inst: Installment | null, amount: string, error?: string}>({isOpen: false, participantId: '', inst: null, amount: ''});
   const [obsModal, setObsModal] = useState<{isOpen: boolean, instId: string, text: string}>({isOpen: false, instId: '', text: ''});
@@ -79,6 +96,14 @@ const Participantes: React.FC = () => {
     month: string,
     participantName: string
   } | null>(null);
+  
+  const [copiedPix, setCopiedPix] = useState(false);
+  
+  const handleCopyPix = () => {
+    navigator.clipboard.writeText("00020101021126470014BR.GOV.BCB.PIX0125acampacentral@hotmail.com5204000053039865802BR5925IGREJA BATISTA CENTRAL NO6009SAO PAULO62080504daqr6304B4D0");
+    setCopiedPix(true);
+    setTimeout(() => setCopiedPix(false), 2000);
+  };
   
   // Update local installments map when global data changes or for detail view
   useEffect(() => {
@@ -533,7 +558,7 @@ const Participantes: React.FC = () => {
     doc.save(`Recibo_${p.name.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
   };
 
-  const generatePaymentBooklet = (p: Participant, installments: Installment[]) => {
+  const generatePaymentBooklet = async (p: Participant, installments: Installment[]) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -548,6 +573,15 @@ const Participantes: React.FC = () => {
     // Original total count for correct labeling (e.g. 3/10)
     const totalInstallmentsCount = installments.length;
     
+    let qrCodeDataUrl = pixQrBase64 || '';
+    if (!qrCodeDataUrl) {
+      try {
+        qrCodeDataUrl = await QRCode.toDataURL('00020101021126470014BR.GOV.BCB.PIX0125acampacentral@hotmail.com5204000053039865802BR5925IGREJA BATISTA CENTRAL NO6009SAO PAULO62080504daqr6304B4D0', { margin: 1, errorCorrectionLevel: 'M' });
+      } catch (err) {
+        console.error('Error generating QR Code', err);
+      }
+    }
+
     let currentY = 10;
     const stubHeight = 65; // Height for each stub
     const padding = 10;
@@ -609,26 +643,42 @@ const Participantes: React.FC = () => {
 
       // PIX Info
       doc.setFillColor(241, 245, 249);
-      doc.rect(padding + 120, currentY + 15, 65, 30, 'F');
+      doc.rect(padding + 105, currentY + 15, 80, 30, 'F');
+      
       doc.setTextColor(71, 85, 105);
-      doc.setFontSize(7);
+      doc.setFontSize(6.5);
       doc.setFont('helvetica', 'bold');
-      doc.text('PAGAMENTO VIA PIX:', padding + 125, currentY + 22);
+      doc.text('PAGAMENTO VIA PIX:', padding + 108, currentY + 20.5);
+      
       doc.setTextColor(37, 99, 235);
-      doc.setFontSize(8);
-      doc.text('acampacentral@hotmail.com', padding + 125, currentY + 27);
+      doc.setFontSize(7);
+      doc.text('acampacentral@hotmail.com', padding + 108, currentY + 25);
+      
       doc.setTextColor(148, 163, 184);
-      doc.setFontSize(6);
-      doc.text('Igreja Batista Central - Itaim Pta', padding + 125, currentY + 32);
+      doc.setFontSize(5.5);
+      doc.text('Igreja Batista Central Itaim', padding + 108, currentY + 29.5);
+
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(5.5);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Escaneie o QR Code ao lado ou', padding + 108, currentY + 35);
+      doc.text('use a chave email acima.', padding + 108, currentY + 39);
+
+      if (qrCodeDataUrl) {
+        // Draw white background card for QR Code
+        doc.setFillColor(255, 255, 255);
+        doc.rect(padding + 157, currentY + 17, 26, 26, 'F');
+        doc.addImage(qrCodeDataUrl, 'PNG', padding + 158, currentY + 18, 24, 24);
+      }
 
       // Footer of Stub
       doc.setDrawColor(226, 232, 240);
       doc.line(padding + 10, currentY + 54, pageWidth - padding - 10, currentY + 54);
       
       doc.setTextColor(148, 163, 184);
-      doc.setFontSize(7);
+      doc.setFontSize(6.5);
       doc.setFont('helvetica', 'italic');
-      doc.text('Este documento é um controle de pagamento. Mantenha seus comprovantes originais.', padding + 10, currentY + 59);
+      doc.text('Controle de pagamento. Confira os dados antes de confirmar o pagamento.', padding + 10, currentY + 59);
       
       doc.text('Autenticação Mecânica / Assinatura do Responsável', pageWidth - padding - 10, currentY + 59, { align: 'right' });
 
@@ -682,10 +732,21 @@ const Participantes: React.FC = () => {
     return { label: 'Em Dia', class: 'bg-blue-500/10 text-blue-400 border-blue-500/20' };
   };
 
-  const filteredParticipants = allParticipants.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.rg.includes(searchTerm)
-  );
+  const filteredParticipants = allParticipants.filter(p => {
+    const searchLower = searchTerm.toLowerCase().trim();
+    if (!searchLower) return true;
+
+    const matchTitularName = p.name.toLowerCase().includes(searchLower);
+    const matchTitularRG = p.rg && p.rg.toLowerCase().includes(searchLower);
+    const matchTitularPhone = p.phone && p.phone.toLowerCase().replace(/\D/g, '').includes(searchLower.replace(/\D/g, ''));
+    
+    const matchDependents = p.dependents && p.dependents.some(dep => 
+      dep.name.toLowerCase().includes(searchLower) || 
+      (dep.rg && dep.rg.toLowerCase().includes(searchLower))
+    );
+
+    return matchTitularName || matchTitularRG || matchTitularPhone || matchDependents;
+  });
 
   const handleExportExcel = () => {
     const data = [];
@@ -941,11 +1002,20 @@ const Participantes: React.FC = () => {
           </div>
           <input 
             type="text" 
-            placeholder="Pesquisar..."
+            placeholder="Pesquisar por nome, RG, telefone ou dependente..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 text-white pl-11 pr-4 py-3.5 sm:py-4 rounded-2xl md:rounded-[24px] focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-600 font-bold text-sm sm:text-base"
+            className="w-full bg-slate-900 border border-slate-800 text-white pl-11 pr-12 py-3.5 sm:py-4 rounded-2xl md:rounded-[24px] focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-slate-600 font-bold text-sm sm:text-base"
           />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-500 hover:text-red-400 transition-colors"
+              title="Limpar pesquisa"
+            >
+              <XCircle size={18} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1544,30 +1614,38 @@ const Participantes: React.FC = () => {
                                 <h4 className="text-xs font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2">
                                   <Receipt size={14} className="text-emerald-400" /> Ações de Recibo
                                 </h4>
-                                <div className="grid grid-cols-3 gap-3">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                   <button 
                                     onClick={() => generatePDFReceipt(p, installmentsMap[p.id] || [])}
-                                    className="flex flex-col items-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-white"
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-white"
                                     title="Recibo"
                                   >
                                     <Download size={20} />
-                                    <span className="text-[8px] font-black uppercase">Recibo</span>
+                                    <span className="text-[8px] font-black uppercase text-center">Recibo</span>
                                   </button>
                                   <button 
                                     onClick={() => generatePaymentBooklet(p, installmentsMap[p.id] || [])}
-                                    className="flex flex-col items-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-blue-400"
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-blue-400"
                                     title="Gerar Carnê"
                                   >
                                     <FileStack size={20} />
-                                    <span className="text-[8px] font-black uppercase">Carnê</span>
+                                    <span className="text-[8px] font-black uppercase text-center">Carnê</span>
                                   </button>
                                   <button 
                                     onClick={() => sendWhatsAppReceipt(p, installmentsMap[p.id] || [])}
-                                    className="flex flex-col items-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-emerald-400"
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-emerald-400"
                                     title="WhatsApp"
                                   >
                                     <Phone size={20} />
-                                    <span className="text-[8px] font-black uppercase">WhatsApp</span>
+                                    <span className="text-[8px] font-black uppercase text-center">WhatsApp</span>
+                                  </button>
+                                  <button 
+                                    onClick={() => setShowPixModal(true)}
+                                    className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all text-slate-400 hover:text-amber-400"
+                                    title="QR Code Pix"
+                                  >
+                                    <QrCode size={20} />
+                                    <span className="text-[8px] font-black uppercase text-center">Pix QR</span>
                                   </button>
                                 </div>
                               </div>
@@ -1863,6 +1941,72 @@ const Participantes: React.FC = () => {
         }}
         onCancel={() => setConfirmStatusModal(null)}
       />
+
+      {/* Pix QR Code Modal */}
+      <AnimatePresence>
+        {showPixModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 p-6 rounded-3xl w-full max-w-sm relative shadow-2xl"
+            >
+              <button 
+                onClick={() => setShowPixModal(false)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                <XCircle size={20} />
+              </button>
+
+              <h3 className="text-sm font-black text-white uppercase tracking-widest mb-6 text-center">
+                QR Code Pix para Pagamento
+              </h3>
+
+              <div className="flex flex-col items-center gap-4 bg-white/5 p-4 rounded-2xl border border-slate-800/80 mb-6">
+                <div className="bg-white p-3 rounded-2xl shadow-inner">
+                  <img 
+                    src="https://i.imgur.com/C3ItOnH.png" 
+                    alt="QR Code Pix"
+                    referrerPolicy="no-referrer"
+                    className="w-44 h-44 object-contain"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 text-center font-semibold leading-relaxed">
+                  Abra o aplicativo do seu banco, escolha "Pagar com Pix" ou "Escanear QR Code" e aponte a câmera.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider">
+                  Pix Copia e Cola
+                </label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value="00020101021126470014BR.GOV.BCB.PIX0125acampacentral@hotmail.com5204000053039865802BR5925IGREJA BATISTA CENTRAL NO6009SAO PAULO62080504daqr6304B4D0"
+                    className="bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none flex-1 truncate select-all"
+                  />
+                  <button 
+                    onClick={handleCopyPix}
+                    className="px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs transition-colors whitespace-nowrap"
+                    title="Copiar Código"
+                  >
+                    {copiedPix ? 'Copiado!' : 'Copiar'}
+                  </button>
+                </div>
+              </div>
+              
+              <div className="mt-4 pt-4 border-t border-slate-800/60 text-center">
+                <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">
+                  Chave Email: acampacentral@hotmail.com
+                </span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Floating Action Button */}
       <button 
