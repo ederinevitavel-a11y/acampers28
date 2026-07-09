@@ -117,7 +117,7 @@ const Participantes: React.FC = () => {
     name: '',
     rg: '',
     phone: '',
-    birthDate: '',
+    birthDate: '1990-01-01',
     transport: 'Carro' as 'Carro' | 'Ônibus',
     installments: getMaxInstallments(),
     dueDay: 10,
@@ -373,7 +373,7 @@ const Participantes: React.FC = () => {
       
       setShowForm(false);
       setEditingId(null);
-      setFormData({ name: '', rg: '', phone: '', birthDate: '', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
+      setFormData({ name: '', rg: '', phone: '', birthDate: '1990-01-01', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
     } catch (error) {
       handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'participants');
     }
@@ -2012,7 +2012,7 @@ const Participantes: React.FC = () => {
       <button 
         onClick={() => {
           setEditingId(null);
-          setFormData({ name: '', rg: '', phone: '', birthDate: '', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
+          setFormData({ name: '', rg: '', phone: '', birthDate: '1990-01-01', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
           setShowForm(true);
         }}
         className="fixed bottom-24 right-6 w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-2xl shadow-indigo-900/40 flex items-center justify-center z-40 active:scale-90 transition-transform hover:bg-indigo-500 md:bottom-10"
