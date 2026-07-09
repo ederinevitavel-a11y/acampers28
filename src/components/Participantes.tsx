@@ -309,6 +309,8 @@ const Participantes: React.FC = () => {
             let currentYear = new Date().getFullYear();
             let currentMonth = new Date().getMonth() + 1; // Start current month (July onwards)
             
+            const userEmail = auth.currentUser?.email || 'N/A';
+            const now = new Date().toISOString();
             for (let i = 0; i < formData.installments; i++) {
               if (currentMonth > 12) { currentMonth = 1; currentYear++; }
               const monthStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
@@ -322,6 +324,8 @@ const Participantes: React.FC = () => {
                 month: monthStr,
                 dueDate: dueDate,
                 isPaid: formData.isPaid,
+                paidByEmail: formData.isPaid ? userEmail : null,
+                paidAt: formData.isPaid ? now : null,
                 timestamp: Date.now()
               });
               currentMonth++;
@@ -348,6 +352,8 @@ const Participantes: React.FC = () => {
           let currentYear = new Date().getFullYear();
           let currentMonth = new Date().getMonth() + 1; // Start current month (July onwards)
           
+          const userEmail = auth.currentUser?.email || 'N/A';
+          const now = new Date().toISOString();
           for (let i = 0; i < formData.installments; i++) {
             if (currentMonth > 12) { currentMonth = 1; currentYear++; }
             const monthStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
@@ -362,6 +368,8 @@ const Participantes: React.FC = () => {
               month: monthStr,
               dueDate: dueDate,
               isPaid: formData.isPaid,
+              paidByEmail: formData.isPaid ? userEmail : null,
+              paidAt: formData.isPaid ? now : null,
               timestamp: Date.now()
             });
             
@@ -382,9 +390,13 @@ const Participantes: React.FC = () => {
   const toggleInstallment = async (participantId: string, installmentId: string, currentPaid: boolean, amount: number) => {
     try {
       const nextPaid = !currentPaid;
+      const userEmail = auth.currentUser?.email || 'N/A';
+      const now = new Date().toISOString();
       await updateDoc(doc(db, 'installments', installmentId), { 
         isPaid: nextPaid,
-        paidAmount: nextPaid ? amount : 0
+        paidAmount: nextPaid ? amount : 0,
+        paidByEmail: nextPaid ? userEmail : null,
+        paidAt: nextPaid ? now : null
       });
       
       // Check if all are paid to update participant status
@@ -432,9 +444,13 @@ const Participantes: React.FC = () => {
 
     try {
       const isPaid = newPaidAmount >= paymentModal.inst.amount;
+      const userEmail = auth.currentUser?.email || 'N/A';
+      const now = new Date().toISOString();
       await updateDoc(doc(db, 'installments', paymentModal.inst.id), { 
         paidAmount: newPaidAmount,
-        isPaid: isPaid
+        isPaid: isPaid,
+        paidByEmail: newPaidAmount > 0 ? userEmail : null,
+        paidAt: newPaidAmount > 0 ? now : null
       });
 
       // Update participant main status
@@ -1675,9 +1691,17 @@ const Participantes: React.FC = () => {
                                           )}>
                                             {inst.isPaid ? <CheckCircle2 size={18} /> : inst.month.split('-')[1]}
                                           </div>
-                                          <div className="min-w-0">
-                                            <p className="text-[11px] font-black text-white leading-none mb-1">{inst.month}</p>
-                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Vence {formatDate(inst.dueDate)}</p>
+                                          <div className="min-w-0 flex flex-col gap-1">
+                                            <div>
+                                              <p className="text-[11px] font-black text-white leading-none mb-1">{inst.month}</p>
+                                              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Vence {formatDate(inst.dueDate)}</p>
+                                            </div>
+                                            {inst.paidByEmail && (
+                                              <span className="text-[9px] font-bold text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded-lg border border-slate-800 inline-block self-start leading-tight">
+                                                Registrado por: <span className="text-indigo-400">{inst.paidByEmail}</span>
+                                                {inst.paidAt && ` em ${new Date(inst.paidAt).toLocaleDateString('pt-BR')} às ${new Date(inst.paidAt).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`}
+                                              </span>
+                                            )}
                                           </div>
                                         </div>
                                         

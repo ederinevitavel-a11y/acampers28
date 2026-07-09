@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext.tsx';
 import { LogIn, LogOut } from 'lucide-react';
 
-const ALLOWED_EMAILS = ['ederlcs@hotmail.com', 'elaine.rsn@hotmail.com', 'rafa-cnunes@hotmail.com'];
+const ALLOWED_EMAILS = ['ederlcs@hotmail.com', 'elaine.rsn@hotmail.com', 'rafa-cnunes@hotmail.com', 'ribeiro.fabio.1988@gmail.com'];
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');

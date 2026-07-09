@@ -106,6 +106,8 @@ export interface Installment {
   dueDate: string; // "YYYY-MM-DD"
   isPaid: boolean;
   observation?: string;
+  paidByEmail?: string | null;
+  paidAt?: string | null;
   timestamp: number;
 }
 

@@ -7,7 +7,8 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'ederlcs@hotmail.com' ||
         request.auth.token.email == 'elaine.rsn@hotmail.com' ||
-        request.auth.token.email == 'rafa-cnunes@hotmail.com'
+        request.auth.token.email == 'rafa-cnunes@hotmail.com' ||
+        request.auth.token.email == 'ribeiro.fabio.1988@gmail.com'
       ); 
     }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
@@ -127,7 +128,9 @@ service cloud.firestore {
         && data.month is string
         && data.dueDate is string
         && data.isPaid is bool
-        && data.timestamp is number;
+        && data.timestamp is number
+        && (!data.keys().contains('paidByEmail') || data.paidByEmail == null || (data.paidByEmail is string && data.paidByEmail.size() <= 150))
+        && (!data.keys().contains('paidAt') || data.paidAt == null || (data.paidAt is string && data.paidAt.size() <= 50));
     }
 
     // Validation for CampExpense (Organization payments)

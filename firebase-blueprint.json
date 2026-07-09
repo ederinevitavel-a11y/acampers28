@@ -142,6 +142,8 @@
         "month": { "type": "string" },
         "dueDate": { "type": "string" },
         "isPaid": { "type": "boolean" },
+        "paidByEmail": { "type": "string" },
+        "paidAt": { "type": "string" },
         "timestamp": { "type": "number" }
       },
       "required": ["participantId", "participantName", "amount", "paidAmount", "month", "dueDate", "isPaid", "timestamp"]
