@@ -520,18 +520,19 @@ const Participantes: React.FC = () => {
     doc.text(`Nome: ${p.name}`, 14, 72);
     doc.text(`RG / RN: ${p.rg || 'Não informado'}`, 14, 79);
     doc.text(`Telefone: ${p.phone || 'Não informado'}`, 14, 86);
+    doc.text(`Valor Pago até o Momento: ${formatCurrency(totalPaid)}`, 14, 93);
     
     // Summary
     doc.setFont('helvetica', 'bold');
-    doc.text('Resumo Financeiro:', 14, 100);
+    doc.text('Resumo Financeiro:', 14, 105);
     doc.setFont('helvetica', 'normal');
     
     autoTable(doc, {
-      startY: 105,
+      startY: 110,
       head: [['Descrição', 'Valor']],
       body: [
         ['Valor Total', formatCurrency(p.totalValue || 0)],
-        ['Total Pago', formatCurrency(totalPaid)],
+        ['Total Pago (até o momento)', formatCurrency(totalPaid)],
         ['Saldo Devedor', formatCurrency((p.totalValue || 0) - totalPaid)]
       ],
       theme: 'striped',
@@ -748,20 +749,41 @@ const Participantes: React.FC = () => {
     return { label: 'Em Dia', class: 'bg-blue-500/10 text-blue-400 border-blue-500/20' };
   };
 
+  const normalizeText = (text: string): string => {
+    if (!text) return '';
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  };
+
   const filteredParticipants = allParticipants.filter(p => {
-    const searchLower = searchTerm.toLowerCase().trim();
-    if (!searchLower) return true;
+    const searchNormalized = normalizeText(searchTerm);
+    if (!searchNormalized) return true;
 
-    const matchTitularName = p.name.toLowerCase().includes(searchLower);
-    const matchTitularRG = p.rg && p.rg.toLowerCase().includes(searchLower);
-    const matchTitularPhone = p.phone && p.phone.toLowerCase().replace(/\D/g, '').includes(searchLower.replace(/\D/g, ''));
-    
-    const matchDependents = p.dependents && p.dependents.some(dep => 
-      dep.name.toLowerCase().includes(searchLower) || 
-      (dep.rg && dep.rg.toLowerCase().includes(searchLower))
-    );
+    // Split search query into individual words to allow multi-word searches in any order
+    const searchWords = searchNormalized.split(/\s+/).filter(Boolean);
+    if (searchWords.length === 0) return true;
 
-    return matchTitularName || matchTitularRG || matchTitularPhone || matchDependents;
+    // Determine status for intelligent status filtering
+    const isOverdue = getParticipantOverdue(p.id);
+    const statusLabel = (!p.totalValue || p.totalValue === 0) ? 'isento' : p.isPaid ? 'liquidado pago' : isOverdue ? 'em atraso atrasado pendente' : 'em dia';
+
+    // Construct a comprehensive searchable string for this participant
+    let searchableText = `${p.name} ${p.rg || ''} ${p.phone || ''} ${p.phone ? p.phone.replace(/\D/g, '') : ''} ${p.transport || ''} ${p.paymentType || ''} ${p.observation || ''} ${statusLabel}`;
+
+    // Add dependents info
+    if (p.dependents && p.dependents.length > 0) {
+      p.dependents.forEach(dep => {
+        searchableText += ` ${dep.name} ${dep.rg || ''} ${dep.relationship || ''} ${dep.paymentType || ''}`;
+      });
+    }
+
+    const normalizedSearchableText = normalizeText(searchableText);
+
+    // Verify if all words from the search query are present in the searchable text
+    return searchWords.every(word => normalizedSearchableText.includes(word));
   });
 
   const handleExportExcel = () => {
@@ -830,6 +852,9 @@ const Participantes: React.FC = () => {
     allParticipants.forEach(p => {
       const status = (!p.totalValue || p.totalValue === 0) ? 'Isento' : p.isPaid ? 'Liquidado' : getParticipantOverdue(p.id) ? 'Em Atraso' : 'Em Dia';
       
+      const pInstallments = installmentsMap[p.id] || [];
+      const totalPaid = pInstallments.filter(i => i.isPaid).reduce((acc, i) => acc + (i.paidAmount || 0), 0);
+      
       tableData.push([
         'Titular',
         p.name,
@@ -838,6 +863,7 @@ const Participantes: React.FC = () => {
         p.ageAtCamp,
         p.paymentType,
         p.transport,
+        formatCurrency(totalPaid),
         status
       ]);
 
@@ -851,6 +877,7 @@ const Participantes: React.FC = () => {
             dep.ageAtCamp,
             dep.paymentType,
             p.transport,
+            '-',
             status
           ]);
         });
@@ -858,7 +885,7 @@ const Participantes: React.FC = () => {
     });
 
     autoTable(doc, {
-      head: [['Tipo', 'Nome', 'RG / RN', 'Nascimento', 'Idade', 'Categoria', 'Transporte', 'Status']],
+      head: [['Tipo', 'Nome', 'RG / RN', 'Nascimento', 'Idade', 'Categoria', 'Transporte', 'Valor Pago', 'Status']],
       body: tableData,
       startY: 35,
       styles: { fontSize: 8 },
