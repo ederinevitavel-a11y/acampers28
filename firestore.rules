@@ -5,10 +5,10 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function isVerified() { 
       return isSignedIn() && (
-        request.auth.token.email == 'ederlcs@hotmail.com' ||
-        request.auth.token.email == 'elaine.rsn@hotmail.com' ||
-        request.auth.token.email == 'rafa-cnunes@hotmail.com' ||
-        request.auth.token.email == 'ribeiro.fabio.1988@gmail.com'
+        request.auth.token.email.lower() == 'ederlcs@hotmail.com' ||
+        request.auth.token.email.lower() == 'elaine.rsn@hotmail.com' ||
+        request.auth.token.email.lower() == 'rafa-cnunes@hotmail.com' ||
+        request.auth.token.email.lower() == 'ribeiro.fabio.1988@gmail.com'
       ); 
     }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }

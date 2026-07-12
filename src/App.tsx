@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext.tsx';
 import { LogIn, LogOut } from 'lucide-react';
 
-const ALLOWED_EMAILS = ['ederlcs@hotmail.com', 'elaine.rsn@hotmail.com', 'rafa-cnunes@hotmail.com', 'ribeiro.fabio.1988@gmail.com'];
+const ALLOWED_EMAILS = ['ederlcs@hotmail.com', 'elaine.rsn@hotmail.com', 'rafa-cnunes@hotmail.com', 'ribeiro.fabio.1988@gmail.com', 'Ribeiro.fabio.1988@gmail.com'];
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
@@ -52,7 +52,9 @@ function AppContent() {
     );
   }
 
-  if (!ALLOWED_EMAILS.includes(user.email || '')) {
+  const userEmail = (user.email || '').toLowerCase();
+  const isAllowed = ALLOWED_EMAILS.some(email => email.toLowerCase() === userEmail);
+  if (!isAllowed) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-black">
         <div className="bg-slate-900 p-8 rounded-3xl shadow-2xl border border-red-900/50 max-w-sm w-full text-center space-y-6">
