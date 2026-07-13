@@ -5,11 +5,9 @@
 
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { 
-  SaborCentralEntry, BrasaGracaEntry, BrilhoCelesteWash, 
-  ConectaCentralEvent, RecebaSuabencaoRaffle, BrilhoCelesteClient, Participant, Installment,
-  BrilhoCelesteExpense, CampExpense
+  Participant, Installment, CampExpense, PaymentHistory
 } from '../types';
 
 export function useConsolidatedData() {
@@ -17,6 +15,7 @@ export function useConsolidatedData() {
     participants: [] as Participant[],
     installments: [] as Installment[],
     campExpenses: [] as CampExpense[],
+    paymentHistory: [] as PaymentHistory[],
     loading: true,
     error: null as string | null
   });
@@ -28,6 +27,7 @@ export function useConsolidatedData() {
       { name: 'participants', key: 'participants' },
       { name: 'installments', key: 'installments' },
       { name: 'camp_expenses', key: 'campExpenses' },
+      { name: 'payment_history', key: 'paymentHistory' },
     ];
 
     let loadedCount = 0;

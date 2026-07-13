@@ -8,7 +8,7 @@ import {
   ArrowUpRight, Download, MoreHorizontal,
   Target, Rocket, Car, Clock, MessageSquare, QrCode
 } from 'lucide-react';
-import { Participant, Installment, Dependent } from '../types';
+import { Participant, Installment, Dependent, PaymentHistory } from '../types';
 import { cn, formatDate, formatCurrency, maskPhone, maskRG } from '../lib/utils';
 import { MEMBERS_LIST } from '../data/members';
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,8 +38,9 @@ const getMaxInstallments = () => {
 };
 
 const Participantes: React.FC = () => {
-  const { participants: allParticipants, installments: allInstallments, loading, error } = useConsolidatedData();
+  const { participants: allParticipants, installments: allInstallments, paymentHistory, loading, error } = useConsolidatedData();
   const [installmentsMap, setInstallmentsMap] = useState<Record<string, Installment[]>>({});
+  const [activeDetailTab, setActiveDetailTab] = useState<Record<string, 'installments' | 'history'>>({});
   const [showForm, setShowForm] = useState(false);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [showPixModal, setShowPixModal] = useState(false);
@@ -392,19 +393,51 @@ const Participantes: React.FC = () => {
       const nextPaid = !currentPaid;
       const userEmail = auth.currentUser?.email || 'N/A';
       const now = new Date().toISOString();
-      await updateDoc(doc(db, 'installments', installmentId), { 
+      const batch = writeBatch(db);
+
+      // We need participant name for the log, we can get it from allParticipants
+      const participant = allParticipants.find(p => p.id === participantId);
+      const participantName = participant ? participant.name : 'Acamper';
+
+      // Get installment info to find which month it is
+      const targetInst = allInstallments.find(i => i.id === installmentId);
+      const month = targetInst ? targetInst.month : '';
+
+      batch.update(doc(db, 'installments', installmentId), { 
         isPaid: nextPaid,
         paidAmount: nextPaid ? amount : 0,
         paidByEmail: nextPaid ? userEmail : null,
         paidAt: nextPaid ? now : null
       });
-      
+
+      // Add payment history log
+      const historyRef = doc(collection(db, 'payment_history'));
+      const amountPaid = nextPaid ? amount : -amount;
+      const description = nextPaid 
+        ? `Parcela de ${month} marcada como PAGA: ${formatCurrency(amount)}`
+        : `Parcela de ${month} de ${month} desmarcada (remoção de ${formatCurrency(amount)})`;
+
+      const historyData: PaymentHistory = {
+        id: historyRef.id,
+        participantId,
+        participantName,
+        amountPaid,
+        date: now,
+        paidByEmail: userEmail,
+        description,
+        timestamp: Date.now()
+      };
+      batch.set(historyRef, historyData);
+
       // Check if all are paid to update participant status
       const q = query(collection(db, 'installments'), where('participantId', '==', participantId));
       const snapshot = await getDocs(q);
       const allPaid = snapshot.docs.every(d => d.id === installmentId ? nextPaid : d.data().isPaid);
       
-      await updateDoc(doc(db, 'participants', participantId), { isPaid: allPaid });
+      batch.update(doc(db, 'participants', participantId), { isPaid: allPaid });
+
+      await batch.commit();
+      setConfirmStatusModal(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `installments/${installmentId}`);
     }
@@ -443,22 +476,157 @@ const Participantes: React.FC = () => {
     }
 
     try {
-      const isPaid = newPaidAmount >= paymentModal.inst.amount;
       const userEmail = auth.currentUser?.email || 'N/A';
       const now = new Date().toISOString();
-      await updateDoc(doc(db, 'installments', paymentModal.inst.id), { 
-        paidAmount: newPaidAmount,
-        isPaid: isPaid,
-        paidByEmail: newPaidAmount > 0 ? userEmail : null,
-        paidAt: newPaidAmount > 0 ? now : null
-      });
+      const batch = writeBatch(db);
 
-      // Update participant main status
+      // Fetch all installments of the participant to calculate overpayment distribution
       const q = query(collection(db, 'installments'), where('participantId', '==', paymentModal.participantId));
       const snapshot = await getDocs(q);
-      const allPaid = snapshot.docs.every(d => d.id === paymentModal.inst!.id ? isPaid : d.data().isPaid);
+      const allInsts = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Installment));
+
+      const targetInstId = paymentModal.inst.id;
+      const targetInst = allInsts.find(i => i.id === targetInstId);
+      if (!targetInst) {
+        throw new Error("Parcela não encontrada.");
+      }
+
+      const updatesMap: Record<string, Partial<Installment>> = {};
+      const addedByMonth: Record<string, number> = {};
+      let excess = 0;
+
+      if (newPaidAmount <= targetInst.amount) {
+        // Normal case: paid amount is less than or equal to this installment's total amount
+        updatesMap[targetInstId] = {
+          paidAmount: newPaidAmount,
+          isPaid: newPaidAmount >= targetInst.amount,
+          paidByEmail: newPaidAmount > 0 ? userEmail : null,
+          paidAt: newPaidAmount > 0 ? now : null
+        };
+        const added = newPaidAmount - (targetInst.paidAmount || 0);
+        if (added !== 0) {
+          addedByMonth[targetInst.month] = added;
+        }
+        excess = 0;
+      } else {
+        // Overpayment case: we fully pay the current installment and have an excess amount to distribute
+        updatesMap[targetInstId] = {
+          paidAmount: targetInst.amount,
+          isPaid: true,
+          paidByEmail: userEmail,
+          paidAt: now
+        };
+        const added = targetInst.amount - (targetInst.paidAmount || 0);
+        if (added !== 0) {
+          addedByMonth[targetInst.month] = added;
+        }
+        excess = newPaidAmount - targetInst.amount;
+      }
+
+      // If we have excess money, distribute it to other unpaid installments chronologically
+      if (excess > 0) {
+        const otherInsts = allInsts
+          .filter(i => i.id !== targetInstId)
+          .sort((a, b) => a.month.localeCompare(b.month));
+
+        for (const inst of otherInsts) {
+          if (excess <= 0) break;
+          if (inst.isPaid) continue;
+
+          const currentPaid = inst.paidAmount || 0;
+          const remainingDue = inst.amount - currentPaid;
+
+          if (remainingDue > 0) {
+            if (excess >= remainingDue) {
+              // This other installment is now fully paid
+              updatesMap[inst.id] = {
+                paidAmount: inst.amount,
+                isPaid: true,
+                paidByEmail: userEmail,
+                paidAt: now
+              };
+              addedByMonth[inst.month] = (addedByMonth[inst.month] || 0) + remainingDue;
+              excess -= remainingDue;
+            } else {
+              // This other installment receives a partial payment
+              const updatedPaidAmount = currentPaid + excess;
+              updatesMap[inst.id] = {
+                paidAmount: updatedPaidAmount,
+                isPaid: false,
+                paidByEmail: userEmail,
+                paidAt: now
+              };
+              addedByMonth[inst.month] = (addedByMonth[inst.month] || 0) + excess;
+              excess = 0;
+            }
+          }
+        }
+
+        // If there's still left-over excess after paying off everything, we can add it to the last installment's paid amount
+        if (excess > 0) {
+          // Find the last installment chronologically to hold the leftover excess
+          const sortedAll = [...allInsts].sort((a, b) => a.month.localeCompare(b.month));
+          const lastInst = sortedAll[sortedAll.length - 1];
+          const lastInstId = lastInst.id;
+
+          if (!updatesMap[lastInstId]) {
+            updatesMap[lastInstId] = {};
+          }
+          const currentBase = updatesMap[lastInstId].paidAmount !== undefined 
+            ? updatesMap[lastInstId].paidAmount 
+            : (lastInst.paidAmount || 0);
+          
+          updatesMap[lastInstId].paidAmount = (currentBase || 0) + excess;
+          updatesMap[lastInstId].isPaid = true;
+          updatesMap[lastInstId].paidByEmail = userEmail;
+          updatesMap[lastInstId].paidAt = now;
+          addedByMonth[lastInst.month] = (addedByMonth[lastInst.month] || 0) + excess;
+        }
+      }
+
+      // Write updates to batch
+      Object.entries(updatesMap).forEach(([id, fields]) => {
+        batch.update(doc(db, 'installments', id), fields);
+      });
+
+      // Add payment history log
+      const breakdown = Object.entries(addedByMonth)
+        .filter(([_, val]) => val !== 0)
+        .map(([month, val]) => `${formatCurrency(val)} na parcela de ${month}`)
+        .join(', ');
       
-      await updateDoc(doc(db, 'participants', paymentModal.participantId), { isPaid: allPaid });
+      const totalAllocated = Object.values(addedByMonth).reduce((a, b) => a + b, 0);
+      const description = breakdown 
+        ? `Pagamento registrado e distribuído: ${breakdown}`
+        : `Ajuste de parcela para ${formatCurrency(newPaidAmount)}`;
+
+      if (totalAllocated !== 0) {
+        const historyRef = doc(collection(db, 'payment_history'));
+        const historyData: PaymentHistory = {
+          id: historyRef.id,
+          participantId: paymentModal.participantId,
+          participantName: targetInst.participantName,
+          amountPaid: totalAllocated,
+          date: now,
+          paidByEmail: userEmail,
+          description,
+          timestamp: Date.now()
+        };
+        batch.set(historyRef, historyData);
+      }
+
+      // Calculate if the entire list of installments for this participant is fully paid
+      const allPaid = allInsts.every(inst => {
+        const update = updatesMap[inst.id];
+        if (update) {
+          return !!update.isPaid;
+        }
+        return inst.isPaid;
+      });
+
+      batch.update(doc(db, 'participants', paymentModal.participantId), { isPaid: allPaid });
+
+      await batch.commit();
       setPaymentModal({ isOpen: false, participantId: '', inst: null, amount: '' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `installments/${paymentModal.inst.id}`);
@@ -466,8 +634,8 @@ const Participantes: React.FC = () => {
   };
 
   const sendWhatsAppReceipt = (p: Participant, installments: Installment[]) => {
-    const paidInstallments = installments.filter(i => i.isPaid);
-    const totalPaid = paidInstallments.reduce((acc, i) => acc + (i.paidAmount || 0), 0);
+    const paidInstallments = installments.filter(i => (i.paidAmount || 0) > 0);
+    const totalPaid = installments.reduce((acc, i) => acc + (i.paidAmount || 0), 0);
     
     let message = `*ACAMPA 2028 - COMPROVANTE DE PAGAMENTO*\n\n`;
     message += `*Acamper:* ${p.name}\n`;
@@ -478,7 +646,7 @@ const Participantes: React.FC = () => {
     if (paidInstallments.length > 0) {
       message += `*Parcelas Pagas:*\n`;
       paidInstallments.forEach(i => {
-        message += `- ${i.month}: ${formatCurrency(i.paidAmount || 0)}\n`;
+        message += `- ${i.month}: ${formatCurrency(i.paidAmount || 0)}${i.isPaid ? ' (Pago)' : ' (Parcial)'}\n`;
       });
     }
     
@@ -492,8 +660,8 @@ const Participantes: React.FC = () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const paidInstallments = installments.filter(i => i.isPaid);
-    const totalPaid = paidInstallments.reduce((acc, i) => acc + (i.paidAmount || 0), 0);
+    const paidInstallments = installments.filter(i => (i.paidAmount || 0) > 0);
+    const totalPaid = installments.reduce((acc, i) => acc + (i.paidAmount || 0), 0);
     const userEmail = auth.currentUser?.email || 'N/A';
     
     // Header
@@ -553,7 +721,7 @@ const Participantes: React.FC = () => {
           i.month,
           formatDate(i.dueDate),
           formatCurrency(i.paidAmount || 0),
-          'PAGO'
+          i.isPaid ? 'PAGO' : 'PARCIAL'
         ]),
         theme: 'striped',
         headStyles: { fillColor: [16, 185, 129] }, // Emerald 500
@@ -656,7 +824,12 @@ const Participantes: React.FC = () => {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       doc.text(formatDate(inst.dueDate), padding + 10, currentY + 48);
-      doc.text(formatCurrency((p.totalValue || 0) / (p.installments || 1)), padding + 60, currentY + 48);
+      const baseVal = (p.totalValue || 0) / (p.installments || 1);
+      const remainingVal = inst.amount - (inst.paidAmount || 0);
+      const valText = inst.paidAmount && inst.paidAmount > 0 
+        ? `${formatCurrency(baseVal)} (A Pagar: ${formatCurrency(remainingVal)})`
+        : formatCurrency(baseVal);
+      doc.text(valText, padding + 60, currentY + 48);
 
       // PIX Info
       doc.setFillColor(241, 245, 249);
@@ -853,7 +1026,7 @@ const Participantes: React.FC = () => {
       const status = (!p.totalValue || p.totalValue === 0) ? 'Isento' : p.isPaid ? 'Liquidado' : getParticipantOverdue(p.id) ? 'Em Atraso' : 'Em Dia';
       
       const pInstallments = installmentsMap[p.id] || [];
-      const totalPaid = pInstallments.filter(i => i.isPaid).reduce((acc, i) => acc + (i.paidAmount || 0), 0);
+      const totalPaid = pInstallments.reduce((acc, i) => acc + (i.paidAmount || 0), 0);
       
       tableData.push([
         'Titular',
@@ -1696,84 +1869,178 @@ const Participantes: React.FC = () => {
 
                             <div className="lg:col-span-8">
                                 <div className="bg-black/30 rounded-3xl border border-slate-800 p-4 sm:p-8 overflow-hidden">
-                                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-                                    <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
-                                      <CreditCard size={14} className="text-indigo-400" /> Extrato de Parcelas
-                                    </h4>
-                                    <div className="text-left sm:text-right bg-slate-900/50 sm:bg-transparent p-3 sm:p-0 rounded-2xl sm:rounded-none w-full sm:w-auto border border-slate-800 sm:border-0">
-                                      <p className="text-[10px] font-black text-slate-500 uppercase">Plano</p>
-                                      <p className="text-xs sm:text-sm font-black text-indigo-400">{p.installments}x de {formatCurrency((p.totalValue || 0) / (p.installments || 1))}</p>
-                                    </div>
-                                  </div>
-                                
-                                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar no-scrollbar">
-                                  {(installmentsMap[p.id] || []).map(inst => {
-                                    const status = getInstallmentStatus(inst);
+                                  {(() => {
+                                    const activeTab = activeDetailTab[p.id] || 'installments';
+                                    const participantLogs = (paymentHistory || [])
+                                      .filter(log => log.participantId === p.id)
+                                      .sort((a, b) => b.timestamp - a.timestamp);
+
                                     return (
-                                      <div key={inst.id} className="bg-slate-900/50 p-3 sm:p-4 rounded-2xl border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group/inst">
-                                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                                          <div className={cn(
-                                            "w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0",
-                                            inst.isPaid ? "bg-emerald-500/10 text-emerald-500" : "bg-slate-800 text-slate-500"
-                                          )}>
-                                            {inst.isPaid ? <CheckCircle2 size={18} /> : inst.month.split('-')[1]}
+                                      <>
+                                        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-4 mb-6 gap-4">
+                                          <div className="flex items-center gap-2">
+                                            <button
+                                              onClick={() => setActiveDetailTab(prev => ({ ...prev, [p.id]: 'installments' }))}
+                                              className={cn(
+                                                "px-4 py-2 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-2",
+                                                activeTab === 'installments' 
+                                                  ? "bg-indigo-500/15 text-indigo-400 border border-indigo-500/30" 
+                                                  : "text-slate-400 hover:text-white hover:bg-slate-800/40 border border-transparent"
+                                              )}
+                                            >
+                                              <CreditCard size={14} />
+                                              Extrato de Parcelas
+                                            </button>
+                                            <button
+                                              onClick={() => setActiveDetailTab(prev => ({ ...prev, [p.id]: 'history' }))}
+                                              className={cn(
+                                                "px-4 py-2 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 relative",
+                                                activeTab === 'history' 
+                                                  ? "bg-indigo-500/15 text-indigo-400 border border-indigo-500/30" 
+                                                  : "text-slate-400 hover:text-white hover:bg-slate-800/40 border border-transparent"
+                                              )}
+                                            >
+                                              <Clock size={14} />
+                                              Histórico de Registros
+                                              {participantLogs.length > 0 && (
+                                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-black text-white ml-1 shrink-0">
+                                                  {participantLogs.length}
+                                                </span>
+                                              )}
+                                            </button>
                                           </div>
-                                          <div className="min-w-0 flex flex-col gap-1">
-                                            <div>
-                                              <p className="text-[11px] font-black text-white leading-none mb-1">{inst.month}</p>
-                                              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Vence {formatDate(inst.dueDate)}</p>
-                                            </div>
-                                            {inst.paidByEmail && (
-                                              <span className="text-[9px] font-bold text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded-lg border border-slate-800 inline-block self-start leading-tight">
-                                                Registrado por: <span className="text-indigo-400">{inst.paidByEmail}</span>
-                                                {inst.paidAt && ` em ${new Date(inst.paidAt).toLocaleDateString('pt-BR')} às ${new Date(inst.paidAt).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`}
-                                              </span>
+                                          <div className="text-left sm:text-right">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase">Plano de Inscrição</p>
+                                            <p className="text-xs font-black text-indigo-400">{p.installments}x de {formatCurrency((p.totalValue || 0) / (p.installments || 1))}</p>
+                                          </div>
+                                        </div>
+
+                                        {activeTab === 'installments' ? (
+                                          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar no-scrollbar">
+                                            {(installmentsMap[p.id] || []).map(inst => {
+                                              return (
+                                                <div key={inst.id} className="bg-slate-900/50 p-3 sm:p-4 rounded-2xl border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group/inst">
+                                                  <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                                                    <div className={cn(
+                                                      "w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0",
+                                                      inst.isPaid ? "bg-emerald-500/10 text-emerald-500" : "bg-slate-800 text-slate-500"
+                                                    )}>
+                                                      {inst.isPaid ? <CheckCircle2 size={18} /> : inst.month.split('-')[1]}
+                                                    </div>
+                                                    <div className="min-w-0 flex flex-col gap-1">
+                                                      <div>
+                                                        <p className="text-[11px] font-black text-white leading-none mb-1">{inst.month}</p>
+                                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Vence {formatDate(inst.dueDate)}</p>
+                                                      </div>
+                                                      {inst.paidByEmail && (
+                                                        <span className="text-[9px] font-bold text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded-lg border border-slate-800 inline-block self-start leading-tight">
+                                                          Registrado por: <span className="text-indigo-400">{inst.paidByEmail}</span>
+                                                          {inst.paidAt && ` em ${new Date(inst.paidAt).toLocaleDateString('pt-BR')} às ${new Date(inst.paidAt).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                  
+                                                  <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 w-full sm:w-auto pt-3 sm:pt-0 border-t border-slate-800/50 sm:border-0">
+                                                    <div className="text-left sm:text-right">
+                                                      <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase leading-none mb-1">Pago</p>
+                                                      <p className="text-xs sm:text-sm font-black text-white">{formatCurrency(inst.paidAmount || 0)}</p>
+                                                    </div>
+                                                    
+                                                    <div className="flex items-center gap-1.5 sm:gap-2">
+                                                      <button 
+                                                        onClick={() => setConfirmStatusModal({
+                                                          participantId: p.id,
+                                                          installmentId: inst.id,
+                                                          currentPaid: inst.isPaid,
+                                                          amount: inst.amount,
+                                                          month: inst.month,
+                                                          participantName: p.name
+                                                        })}
+                                                        className={cn(
+                                                          "p-2 sm:p-2.5 rounded-xl transition-all",
+                                                          inst.isPaid ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-500 hover:bg-emerald-500/20 hover:text-emerald-400"
+                                                        )}
+                                                        title={inst.isPaid ? "Marcar como pendente" : "Marcar como pago"}
+                                                      >
+                                                        <CheckCircle2 size={18} />
+                                                      </button>
+                                                      <button 
+                                                        onClick={() => openPartialPayment(p.id, inst)}
+                                                        className="p-2 sm:p-2.5 bg-slate-800 text-slate-500 hover:bg-blue-500/20 hover:text-blue-400 rounded-xl transition-all"
+                                                        title="Pagamento Parcial"
+                                                      >
+                                                        <CreditCard size={18} />
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : (
+                                          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar no-scrollbar">
+                                            {participantLogs.length === 0 ? (
+                                              <div className="flex flex-col items-center justify-center py-12 text-center">
+                                                <div className="w-12 h-12 rounded-full bg-slate-800/50 flex items-center justify-center text-slate-500 mb-3 border border-slate-700/30 animate-pulse">
+                                                  <Clock size={20} />
+                                                </div>
+                                                <p className="text-xs font-bold text-slate-400">Nenhum pagamento registrado no histórico</p>
+                                                <p className="text-[10px] text-slate-500 mt-1 max-w-[280px]">Os pagamentos ou parcelas baixadas a partir de agora aparecerão listados aqui de forma imutável.</p>
+                                              </div>
+                                            ) : (
+                                              participantLogs.map(log => (
+                                                <div key={log.id} className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800/80 flex flex-col gap-3">
+                                                  <div className="flex items-start justify-between gap-4">
+                                                    <div className="flex items-center gap-3">
+                                                      <div className={cn(
+                                                        "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border",
+                                                        log.amountPaid > 0 
+                                                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+                                                          : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                                      )}>
+                                                        <ArrowUpRight size={16} className={log.amountPaid < 0 ? "rotate-180" : ""} />
+                                                      </div>
+                                                      <div>
+                                                        <p className="text-xs font-black text-white leading-none mb-1">
+                                                          {log.amountPaid > 0 ? "Pagamento Recebido" : "Ajuste / Cancelamento"}
+                                                        </p>
+                                                        <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                                                          {new Date(log.date).toLocaleDateString('pt-BR')} às {new Date(log.date).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
+                                                        </p>
+                                                      </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                      <span className={cn(
+                                                        "text-sm font-black",
+                                                        log.amountPaid > 0 ? "text-emerald-400" : "text-rose-400"
+                                                      )}>
+                                                        {log.amountPaid > 0 ? "+" : ""}{formatCurrency(log.amountPaid)}
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  
+                                                  <div className="bg-slate-950/40 px-3 py-2.5 rounded-xl border border-slate-900/60">
+                                                    <p className="text-[11px] text-slate-300 font-bold leading-relaxed">{log.description}</p>
+                                                  </div>
+                                                  
+                                                  <div className="flex items-center justify-between text-[9px] text-slate-500 font-bold">
+                                                    <span>REGISTRADO POR: <span className="text-indigo-400">{log.paidByEmail}</span></span>
+                                                    <span className="text-slate-600 font-mono text-[8px] uppercase">ID: {log.id.slice(0, 8)}</span>
+                                                  </div>
+                                                </div>
+                                              ))
                                             )}
                                           </div>
-                                        </div>
-                                        
-                                        <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 w-full sm:w-auto pt-3 sm:pt-0 border-t border-slate-800/50 sm:border-0">
-                                          <div className="text-left sm:text-right">
-                                            <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase leading-none mb-1">Pago</p>
-                                            <p className="text-xs sm:text-sm font-black text-white">{formatCurrency(inst.paidAmount || 0)}</p>
-                                          </div>
-                                          
-                                          <div className="flex items-center gap-1.5 sm:gap-2">
-                                            <button 
-                                              onClick={() => setConfirmStatusModal({
-                                                participantId: p.id,
-                                                installmentId: inst.id,
-                                                currentPaid: inst.isPaid,
-                                                amount: inst.amount,
-                                                month: inst.month,
-                                                participantName: p.name
-                                              })}
-                                              className={cn(
-                                                "p-2 sm:p-2.5 rounded-xl transition-all",
-                                                inst.isPaid ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-500 hover:bg-emerald-500/20 hover:text-emerald-400"
-                                              )}
-                                              title={inst.isPaid ? "Marcar como pendente" : "Marcar como pago"}
-                                            >
-                                              <CheckCircle2 size={18} />
-                                            </button>
-                                            <button 
-                                              onClick={() => openPartialPayment(p.id, inst)}
-                                              className="p-2 sm:p-2.5 bg-slate-800 text-slate-500 hover:bg-blue-500/20 hover:text-blue-400 rounded-xl transition-all"
-                                              title="Pagamento Parcial"
-                                            >
-                                              <CreditCard size={18} />
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </div>
+                                        )}
+                                      </>
                                     );
-                                  })}
+                                  })()}
                                 </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      </motion.div>
+                        </motion.div>
                     )}
                   </AnimatePresence>
                 </motion.div>

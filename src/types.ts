@@ -111,6 +111,17 @@ export interface Installment {
   timestamp: number;
 }
 
+export interface PaymentHistory {
+  id: string;
+  participantId: string;
+  participantName: string;
+  amountPaid: number;
+  date: string; // ISO string
+  paidByEmail: string;
+  description: string;
+  timestamp: number;
+}
+
 export interface Dependent {
   id: string;
   name: string;

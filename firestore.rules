@@ -144,6 +144,19 @@ service cloud.firestore {
         && data.timestamp is number;
     }
 
+    // Validation for PaymentHistory
+    function isValidPaymentHistory(data) {
+      return data.keys().hasAll(['participantId', 'participantName', 'amountPaid', 'date', 'paidByEmail', 'description', 'timestamp'])
+        && data.keys().size() <= 8
+        && data.participantId is string && data.participantId.size() <= 128
+        && data.participantName is string && data.participantName.size() <= 200
+        && data.amountPaid is number
+        && data.date is string && data.date.size() <= 100
+        && data.paidByEmail is string && data.paidByEmail.size() <= 150
+        && data.description is string && data.description.size() <= 2000
+        && data.timestamp is number;
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;
@@ -209,6 +222,13 @@ service cloud.firestore {
       allow list: if isVerified();
       allow get, delete: if isVerified() && isValidId(expenseId);
       allow create, update: if isVerified() && isValidCampExpense(incoming());
+    }
+
+    match /payment_history/{historyId} {
+      allow list: if isVerified();
+      allow get, delete: if isVerified() && isValidId(historyId);
+      allow create: if isVerified() && isValidId(historyId) && isValidPaymentHistory(incoming());
+      allow update, delete: if isVerified() && isValidId(historyId);
     }
   }
 }
