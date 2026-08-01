@@ -23,17 +23,24 @@ import QRCode from 'qrcode';
 
 const CAMP_DATE = new Date('2028-01-29T00:00:00'); // Novo Acampa 28 date
 
-const getMaxInstallments = () => {
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth() + 1; // 1-12
+const getMaxInstallments = (startMonthStr?: string) => {
+  let year = new Date().getFullYear();
+  let month = new Date().getMonth() + 1; // 1-12
+  
+  if (startMonthStr) {
+    const [y, m] = startMonthStr.split('-');
+    if (y && m) {
+      year = parseInt(y, 10);
+      month = parseInt(m, 10);
+    }
+  }
   
   // Deadline: Dec 2027
   const targetYear = 2027;
   const targetMonth = 12;
   
-  // Total months available from CURRENT month
-  const totalMonths = ((targetYear - currentYear) * 12) + (targetMonth - currentMonth) + 1;
+  // Total months available from start month
+  const totalMonths = ((targetYear - year) * 12) + (targetMonth - month) + 1;
   return Math.max(1, totalMonths);
 };
 
@@ -124,6 +131,7 @@ const Participantes: React.FC = () => {
     dueDay: 10,
     observation: '',
     isPaid: false,
+    startMonth: new Date().toISOString().substring(0, 7),
     dependents: [] as Dependent[]
   });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -307,8 +315,9 @@ const Participantes: React.FC = () => {
           
           if (totalValue > 0 && formData.installments > 0) {
             const installmentAmount = totalValue / formData.installments;
-            let currentYear = new Date().getFullYear();
-            let currentMonth = new Date().getMonth() + 1; // Start current month (July onwards)
+            const [startYearStr, startMonthStr] = formData.startMonth.split('-');
+            let currentYear = parseInt(startYearStr, 10);
+            let currentMonth = parseInt(startMonthStr, 10);
             
             const userEmail = auth.currentUser?.email || 'N/A';
             const now = new Date().toISOString();
@@ -350,8 +359,9 @@ const Participantes: React.FC = () => {
           const batch = writeBatch(db);
           const installmentAmount = totalValue / formData.installments;
           
-          let currentYear = new Date().getFullYear();
-          let currentMonth = new Date().getMonth() + 1; // Start current month (July onwards)
+          const [startYearStr, startMonthStr] = formData.startMonth.split('-');
+          let currentYear = parseInt(startYearStr, 10);
+          let currentMonth = parseInt(startMonthStr, 10);
           
           const userEmail = auth.currentUser?.email || 'N/A';
           const now = new Date().toISOString();
@@ -382,7 +392,7 @@ const Participantes: React.FC = () => {
       
       setShowForm(false);
       setEditingId(null);
-      setFormData({ name: '', rg: '', phone: '', birthDate: '1990-01-01', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
+      setFormData({ name: '', rg: '', phone: '', birthDate: '1990-01-01', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, startMonth: new Date().toISOString().substring(0, 7), dependents: [] });
     } catch (error) {
       handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'participants');
     }
@@ -880,6 +890,17 @@ const Participantes: React.FC = () => {
 
   const handleEditParticipant = (p: Participant) => {
     setEditingId(p.id);
+    
+    // Find earliest installment month to preserve original timeline
+    const pInsts = allInstallments.filter(i => i.participantId === p.id);
+    let originalStartMonth = '';
+    if (pInsts.length > 0) {
+      const sorted = [...pInsts].sort((a, b) => a.month.localeCompare(b.month));
+      originalStartMonth = sorted[0].month;
+    } else {
+      originalStartMonth = new Date().toISOString().substring(0, 7);
+    }
+
     setFormData({
       name: p.name,
       rg: p.rg,
@@ -890,6 +911,7 @@ const Participantes: React.FC = () => {
       dueDay: p.dueDay || 10,
       observation: p.observation || '',
       isPaid: p.isPaid,
+      startMonth: originalStartMonth,
       dependents: p.dependents || []
     });
     setShowForm(true);
@@ -1479,7 +1501,7 @@ const Participantes: React.FC = () => {
                           <h3 className="text-[10px] sm:text-xs font-black text-white uppercase tracking-widest">Planejamento Financeiro</h3>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4 sm:gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
                           <div className="space-y-1">
                             <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Parcelas</label>
                             <select 
@@ -1487,7 +1509,7 @@ const Participantes: React.FC = () => {
                               onChange={e => setFormData({...formData, installments: Number(e.target.value)})}
                               className="w-full bg-slate-900 border border-slate-800 text-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl outline-none font-black text-sm"
                             >
-                              {[...Array(getMaxInstallments())].map((_, i) => (
+                              {[...Array(getMaxInstallments(formData.startMonth))].map((_, i) => (
                                 <option key={i + 1} value={i + 1}>{i + 1}x</option>
                               ))}
                             </select>
@@ -1503,6 +1525,15 @@ const Participantes: React.FC = () => {
                                 <option key={day} value={day}>Dia {day}</option>
                               ))}
                             </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Mês de Início</label>
+                            <input 
+                              type="month"
+                              value={formData.startMonth}
+                              onChange={e => setFormData({...formData, startMonth: e.target.value})}
+                              className="w-full bg-slate-900 border border-slate-800 text-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl outline-none font-black text-sm"
+                            />
                           </div>
                         </div>
 
@@ -2330,7 +2361,7 @@ const Participantes: React.FC = () => {
       <button 
         onClick={() => {
           setEditingId(null);
-          setFormData({ name: '', rg: '', phone: '', birthDate: '1990-01-01', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, dependents: [] });
+          setFormData({ name: '', rg: '', phone: '', birthDate: '1990-01-01', transport: 'Carro', installments: 1, dueDay: 10, observation: '', isPaid: false, startMonth: new Date().toISOString().substring(0, 7), dependents: [] });
           setShowForm(true);
         }}
         className="fixed bottom-24 right-6 w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-2xl shadow-indigo-900/40 flex items-center justify-center z-40 active:scale-90 transition-transform hover:bg-indigo-500 md:bottom-10"
